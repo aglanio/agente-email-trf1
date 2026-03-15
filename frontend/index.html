@@ -1,0 +1,1840 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agente E-mail TRF1</title>
+<style>
+  :root {
+    --bg: #07070f;
+    --bg2: #0f0f1a;
+    --bg3: #15152a;
+    --border: #1e1e3a;
+    --accent: #4f46e5;
+    --accent2: #7c3aed;
+    --text: #e5e5f7;
+    --text2: #9898b8;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --blue: #3b82f6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 14px; }
+  header h1 { font-size: 17px; font-weight: 700; color: var(--text); }
+  header h1 span { color: var(--accent2); }
+  .header-status { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot-green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-red { background: var(--red); }
+  nav { background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; gap: 0; padding: 0 16px; }
+  nav button { background: none; border: none; color: var(--text2); padding: 11px 18px; cursor: pointer; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; transition: all .15s; }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--accent2); border-bottom-color: var(--accent2); }
+  .main { flex: 1; display: flex; overflow: hidden; }
+  .page { display: none; flex: 1; overflow-y: auto; padding: 20px; }
+  .page.active { display: block; }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .card-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 14px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .kpi { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+  .kpi-num { font-size: 28px; font-weight: 700; color: var(--accent2); }
+  .kpi-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { background: var(--bg3); }
+  th { padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text2); border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:hover td { background: rgba(79,70,229,.05); }
+  .badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .b-pend { background: rgba(234,179,8,.15); color: var(--yellow); }
+  .b-rasc { background: rgba(59,130,246,.15); color: var(--blue); }
+  .b-env { background: rgba(34,197,94,.15); color: var(--green); }
+  .b-err { background: rgba(239,68,68,.15); color: var(--red); }
+  .b-alta { background: rgba(34,197,94,.15); color: var(--green); }
+  .b-med { background: rgba(234,179,8,.15); color: var(--yellow); }
+  .b-baixa { background: rgba(239,68,68,.15); color: var(--red); }
+  .btn { padding: 7px 14px; border-radius: 7px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-p { background: var(--accent); color: #fff; }
+  .btn-p:hover { background: var(--accent2); }
+  .btn-s { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn-s:hover { background: var(--border); }
+  .btn-ok { background: rgba(34,197,94,.2); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  input[type=text], input[type=email], select, textarea {
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 12px; border-radius: 7px; font-size: 13px; width: 100%;
+  }
+  input[type=text]:focus, select:focus { outline: none; border-color: var(--accent2); }
+  label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px; margin-top: 12px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .upload-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 30px; text-align: center; cursor: pointer; transition: all .2s; color: var(--text2); }
+  .upload-zone:hover { border-color: var(--accent2); background: rgba(79,70,229,.05); }
+  .upload-zone input[type=file] { display: none; }
+  .upload-icon { font-size: 32px; margin-bottom: 8px; }
+  .er { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; font-size: 13px; }
+  .er-addr { font-size: 15px; font-weight: 600; color: var(--accent2); margin-bottom: 6px; }
+  .er-meta { color: var(--text2); font-size: 12px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .toolbar .search { flex: 1; min-width: 200px; }
+  .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+  .a-info { background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.25); color: #93c5fd; }
+  .a-ok { background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.25); color: #86efac; }
+  .a-warn { background: rgba(234,179,8,.12); border: 1px solid rgba(234,179,8,.25); color: #fde047; }
+  .a-err { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.25); color: #fca5a5; }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 999; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 90%; max-width: 560px; max-height: 85vh; overflow-y: auto; }
+  .modal-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
+  .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+  .sug-item { background: var(--bg3); border: 1px solid var(--border); padding: 8px 12px; border-radius: 7px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 4px; }
+  .sug-item:hover { border-color: var(--accent2); }
+  input[type=checkbox] { width: auto; cursor: pointer; accent-color: var(--accent2); }
+  .text2 { color: var(--text2); font-size: 13px; }
+  .flex { display: flex; align-items: center; gap: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>&#9878;&#65039;</div>
+  <h1>Agente E-mail <span>TRF1</span></h1>
+  <div class="header-status">
+    <span id="outlookLbl"><span class="dot dot-red" id="dotOutlook"></span> Outlook</span>
+    <span id="contatosLbl">...</span>
+    <span id="relogio"></span>
+  </div>
+</header>
+
+<nav>
+  <button class="active" data-page="processos">&#128203; Processos</button>
+  <button data-page="upload">&#128228; Novo PDF</button>
+  <button data-page="contatos">&#128218; Contatos</button>
+  <button data-page="historico">&#128232; Hist&#243;rico</button>
+  <button data-page="texto">&#128203; Colar Texto</button>
+  <button data-page="escritorio">&#127970; Escritório IA</button>
+</nav>
+
+<div class="main">
+
+  <div id="page-processos" class="page active">
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-num" id="kpiTotal">0</div><div class="kpi-label">Total</div></div>
+      <div class="kpi"><div class="kpi-num" id="kpiPend" style="color:var(--yellow)">0</div><div class="kpi-label">Pendentes</div></div>
+      <div class="kpi"><div class="kpi-num" id="kpiRasc" style="color:var(--blue)">0</div><div class="kpi-label">Rascunhos</div></div>
+      <div class="kpi"><div class="kpi-num" id="kpiEnv" style="color:var(--green)">0</div><div class="kpi-label">Enviados</div></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <input class="search" id="sProc" type="text" placeholder="Buscar processo ou destinat&#225;rio...">
+        <select id="fStatus">
+          <option value="">Todos</option>
+          <option value="pendente">Pendente</option>
+          <option value="rascunho">Rascunho</option>
+          <option value="enviado">Enviado</option>
+        </select>
+        <button class="btn btn-p" id="btnRascLote">&#9993;&#65039; Criar Rascunhos</button>
+        <button class="btn btn-s" id="btnRefresh">&#8635;</button>
+      </div>
+      <div id="alertProc"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="checkAll"></th>
+              <th>Processo</th>
+              <th>Destinat&#225;rio</th>
+              <th>E-mail</th>
+              <th>Confian&#231;a</th>
+              <th>Status</th>
+              <th>A&#231;&#245;es</th>
+            </tr>
+          </thead>
+          <tbody id="tbProc"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-upload" class="page">
+    <div class="card" style="max-width:620px">
+      <div class="card-title">&#128196; Adicionar Processo via PDF</div>
+      <p class="text2" style="margin-bottom:16px">Fa&#231;a upload do mandado + anexo. O sistema extrai destinat&#225;rio e busca o e-mail automaticamente.</p>
+      <label>PDF do Mandado *</label>
+      <div class="upload-zone" id="zoneMandado">
+        <input type="file" id="fileMandado" accept=".pdf">
+        <div class="upload-icon">&#128196;</div>
+        <div id="lblMandado">Clique ou arraste o mandado aqui</div>
+        <div class="text2" style="font-size:11px;margin-top:4px">PDF — mandado de intima&#231;&#227;o</div>
+      </div>
+      <label style="margin-top:16px">PDF do Anexo (opcional)</label>
+      <div class="upload-zone" id="zoneAnexo">
+        <input type="file" id="fileAnexo" accept=".pdf">
+        <div class="upload-icon">&#128206;</div>
+        <div id="lblAnexo">Clique ou arraste o anexo aqui</div>
+        <div class="text2" style="font-size:11px;margin-top:4px">PDF — documento anexo</div>
+      </div>
+      <button class="btn btn-p" id="btnUpload" style="width:100%;margin-top:20px">
+        &#128269; Extrair Informa&#231;&#245;es e Buscar E-mail
+      </button>
+      <div id="uploadRes" style="display:none;margin-top:16px"></div>
+    </div>
+  </div>
+
+  <div id="page-contatos" class="page">
+    <div class="card">
+      <div class="toolbar">
+        <input class="search" id="sCont" type="text" placeholder="Buscar contato, &#243;rg&#227;o ou e-mail...">
+        <button class="btn btn-s" id="btnImport">&#128260; Reimportar Agendas</button>
+        <button class="btn btn-s" id="btnImportSent" title="Varre todos os enviados do Outlook e importa com forma de tratamento">&#128228; Importar Enviados (com Tratamento)</button>
+      </div>
+      <div id="alertCont"></div>
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">&#128270; Testar Busca de E-mail</div>
+        <div class="flex">
+          <input type="text" id="testBusca" placeholder="Nome do &#243;rg&#227;o ou destinat&#225;rio..." style="flex:1">
+          <button class="btn btn-p btn-sm" id="btnTestBusca">Buscar</button>
+        </div>
+        <div id="testBuscaRes"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Nome / &#211;rg&#227;o</th><th>E-mail</th><th>Tratamento</th><th>Categoria</th><th>Fonte</th></tr>
+          </thead>
+          <tbody id="tbCont"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Colar Texto ─────────────────────────────────────────────── -->
+  <div id="page-texto" class="page">
+    <div class="card" style="max-width:720px">
+      <div class="card-title">&#128203; Extrair N&#250;meros de Processo do Texto</div>
+      <p class="text2" style="margin-bottom:14px">Cole qualquer texto (lista PJe, e-mail, relat&#243;rio). O sistema extrai todos os n&#250;meros CNJ automaticamente, mesmo com texto junto.</p>
+      <textarea id="textoInput" placeholder="Cole aqui o texto com os n&#250;meros de processo...&#10;&#10;Exemplo:&#10;  Processo 1234567-89.2024.4.01.3400 - INSS&#10;  Processo 9876543-21.2023.4.01.0000 - Caixa Econ&#244;mica" style="height:130px;resize:vertical;font-family:monospace;font-size:13px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:7px;width:100%"></textarea>
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
+        <button class="btn btn-p" id="btnExtrai">&#128269; Extrair N&#250;meros</button>
+        <button class="btn btn-s" id="btnLimpaTexto">Limpar</button>
+        <span id="textoCount" style="color:var(--text2);font-size:13px"></span>
+      </div>
+      <div id="textoRes" style="margin-top:16px"></div>
+    </div>
+  </div>
+
+  <div id="page-historico" class="page">
+    <div class="card">
+      <div class="card-title">&#128232; Hist&#243;rico de E-mails</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Processo</th><th>Destinat&#225;rio</th><th>E-mail</th><th>Assunto</th><th>Data</th></tr>
+          </thead>
+          <tbody id="tbHist"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Escritório Virtual de IA ─────────────────────────────────── -->
+  <div id="page-escritorio" class="page">
+    <style>
+      .esc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+      .esc-tabs{display:flex;gap:4px;background:var(--bg3);border-radius:8px;padding:4px}
+      .esc-tab{background:none;border:none;color:var(--text2);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
+      .esc-tab.active{background:var(--accent);color:#fff}
+      .esc-panel{display:none}.esc-panel.active{display:block}
+      .agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-bottom:20px}
+      .agent-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;position:relative;cursor:pointer;transition:all .15s}
+      .agent-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+      .agent-card.selected{border-color:var(--accent2);box-shadow:0 0 0 2px rgba(124,58,237,.25)}
+      .agent-avatar{font-size:36px;text-align:center;margin-bottom:10px}
+      .agent-name{font-weight:700;text-align:center;font-size:15px;color:var(--text)}
+      .agent-role{font-size:12px;color:var(--text2);text-align:center;margin-bottom:12px}
+      .agent-status{display:flex;align-items:center;justify-content:center;gap:5px;font-size:11px}
+      .agent-actions{display:flex;gap:6px;margin-top:12px;justify-content:center}
+      .chat-box{display:flex;flex-direction:column;height:520px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+      .chat-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--bg3)}
+      .chat-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+      .msg-user{align-self:flex-end;background:var(--accent);color:#fff;padding:10px 14px;border-radius:12px 12px 4px 12px;max-width:75%;font-size:13px;line-height:1.5}
+      .msg-agent{align-self:flex-start;background:var(--bg3);border:1px solid var(--border);padding:10px 14px;border-radius:12px 12px 12px 4px;max-width:75%;font-size:13px;line-height:1.5}
+      .msg-agent-name{font-size:11px;color:var(--text2);margin-bottom:4px;font-weight:600}
+      .chat-input-row{padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px}
+      .chat-input-row input{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none}
+      .chat-input-row input:focus{border-color:var(--accent)}
+      .task-list{display:flex;flex-direction:column;gap:8px}
+      .task-item{display:flex;align-items:center;gap:10px;background:var(--bg3);border-radius:8px;padding:10px 14px}
+      .task-item input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
+      .task-item.done span{text-decoration:line-through;color:var(--text2)}
+      .doc-item{display:flex;justify-content:space-between;align-items:center;background:var(--bg3);border-radius:8px;padding:10px 14px;margin-bottom:8px;cursor:pointer}
+      .doc-item:hover{background:var(--bg2)}
+      .reunion-selector{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+      .reunion-chip{padding:5px 12px;border-radius:20px;border:1px solid var(--border);font-size:12px;cursor:pointer;background:var(--bg3);transition:all .15s}
+      .reunion-chip.selected{background:var(--accent);color:#fff;border-color:var(--accent)}
+      .pulsing{animation:pulse 2s infinite}
+      @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    </style>
+
+    <div class="esc-header">
+      <div>
+        <h2 style="font-size:1.15rem;font-weight:700">🏢 Escritório Virtual de IA</h2>
+        <p style="font-size:12px;color:var(--text2);margin-top:2px">Seu time de IA trabalhando para você</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" onclick="escContratarAbrir()">+ Contratar Agente</button>
+        <div class="esc-tabs">
+          <button class="esc-tab active" onclick="escTab('escritorio',this)">🏢 Escritório</button>
+          <button class="esc-tab" onclick="escTab('reuniao',this)">🤝 Reunião</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel: Escritório (agentes + chat individual) -->
+    <div id="esc-panel-escritorio" class="esc-panel active" style="display:flex;gap:20px">
+      <!-- Grid de agentes -->
+      <div style="flex:1;min-width:0">
+        <div class="agent-grid" id="agentGrid"></div>
+      </div>
+      <!-- Painel de chat lateral -->
+      <div id="escChatPanel" style="width:420px;display:none;flex-direction:column">
+        <div class="chat-box" id="escChatBox">
+          <div class="chat-header">
+            <span id="escChatAvatar" style="font-size:22px">🤖</span>
+            <div>
+              <div id="escChatName" style="font-weight:700;font-size:14px">Agente</div>
+              <div id="escChatRole" style="font-size:11px;color:var(--text2)">-</div>
+            </div>
+            <button class="btn btn-s" style="margin-left:auto" onclick="escFecharChat()">✕</button>
+          </div>
+          <div class="chat-msgs" id="escMsgs"></div>
+          <div class="chat-input-row">
+            <input type="text" id="escInput" placeholder="Digite sua mensagem..." onkeydown="if(event.key==='Enter')escEnviar()">
+            <button class="btn btn-p" onclick="escEnviar()">Enviar</button>
+          </div>
+        </div>
+        <!-- Tarefas -->
+        <div class="card" style="margin-top:14px;max-height:260px;overflow-y:auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-weight:600;font-size:13px">📋 Tarefas</span>
+            <button class="btn btn-s" style="font-size:11px;padding:3px 8px" onclick="escAddTarefa()">+ Nova</button>
+          </div>
+          <div class="task-list" id="escTarefas"></div>
+        </div>
+        <!-- Docs -->
+        <div class="card" style="margin-top:10px;max-height:200px;overflow-y:auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-weight:600;font-size:13px">📄 Documentos</span>
+            <button class="btn btn-s" style="font-size:11px;padding:3px 8px" onclick="escAddDoc()">+ Novo</button>
+          </div>
+          <div id="escDocs"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel: Sala de Reunião -->
+    <div id="esc-panel-reuniao" class="esc-panel">
+      <div class="card">
+        <div class="card-title">🤝 Sala de Reunião — Múltiplos Agentes</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Selecione os agentes que participarão da reunião:</p>
+        <div class="reunion-selector" id="reuniaoSelector"></div>
+        <div class="chat-box" style="margin-top:14px">
+          <div class="chat-msgs" id="reuniaoMsgs">
+            <div style="text-align:center;color:var(--text2);font-size:13px;padding:20px">Selecione os agentes e comece a conversa</div>
+          </div>
+          <div class="chat-input-row">
+            <input type="text" id="reuniaoInput" placeholder="Fale com todos os agentes selecionados..." onkeydown="if(event.key==='Enter')reuniaoEnviar()">
+            <button class="btn btn-p" onclick="reuniaoEnviar()">Enviar para todos</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Contratar Agente -->
+  <div class="modal-overlay" id="modalContratar" style="display:none">
+    <div class="modal">
+      <div class="modal-title">➕ Contratar Novo Agente</div>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">
+        <div style="display:flex;gap:10px">
+          <div style="flex:0 0 60px">
+            <label style="font-size:12px;color:var(--text2)">Avatar</label>
+            <input type="text" id="novoAvatar" value="🤖" maxlength="2" class="form-inp" style="text-align:center;font-size:24px;padding:4px">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:12px;color:var(--text2)">Nome</label>
+            <input type="text" id="novoNome" placeholder="Ex: Ana" class="form-inp">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text2)">Cargo / Especialidade</label>
+          <input type="text" id="novoCargo" placeholder="Ex: Especialista em Direito Trabalhista" class="form-inp">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text2)">Personalidade / Instrução (system prompt)</label>
+          <textarea id="novoPrompt" rows="4" placeholder="Você é Ana, especialista em direito trabalhista. Analisa processos trabalhistas, sugere estratégias e redige peças processuais com precisão." class="form-inp" style="resize:vertical"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-s" onclick="escFecharModal()">Cancelar</button>
+        <button class="btn btn-p" onclick="escContratar()">✓ Contratar</button>
+      </div>
+    </div>
+  </div>
+
+<div class="modal-overlay" id="modalProc">
+  <div class="modal">
+    <div class="modal-title">Detalhes do Processo</div>
+    <div id="modalProcContent"></div>
+    <div class="modal-footer">
+      <button class="btn btn-s" id="btnModalFechar">Fechar</button>
+      <button class="btn btn-ok" id="btnModalRasc">&#9993;&#65039; Criar Rascunho no Outlook</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Envio -->
+<div class="modal-overlay" id="modalEnv">
+  <div class="modal">
+    <div class="modal-title">&#10003; Marcar como Enviado</div>
+    <p class="text2" style="margin-bottom:16px">Confirma que revisou e enviou o e-mail manualmente pelo Outlook?</p>
+    <div id="modalEnvInfo"></div>
+    <div class="modal-footer">
+      <button class="btn btn-s" id="btnEnvCancel">Cancelar</button>
+      <button class="btn btn-ok" id="btnEnvConfirm">&#10003; Sim, foi enviado</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8090/api';
+let procs = [];
+let procAtual = null;
+let envId = null;
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(function init() {
+  tick();
+  setInterval(tick, 1000);
+  loadStatus();
+  setInterval(loadStatus, 30000);
+  loadProcs();
+  bindEvents();
+})();
+
+function tick() {
+  document.getElementById('relogio').textContent =
+    new Date().toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'});
+}
+
+function bindEvents() {
+  // Nav
+  document.querySelectorAll('nav button').forEach(btn => {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      this.classList.add('active');
+      const pg = this.getAttribute('data-page');
+      document.getElementById('page-' + pg).classList.add('active');
+      if (pg === 'contatos') loadConts();
+      if (pg === 'historico') loadHist();
+      if (pg === 'escritorio') escCarregar();
+    });
+  });
+
+  // Processos
+  document.getElementById('sProc').addEventListener('input', filterProcs);
+  document.getElementById('fStatus').addEventListener('change', loadProcs);
+  document.getElementById('btnRefresh').addEventListener('click', loadProcs);
+  document.getElementById('btnRascLote').addEventListener('click', criarRascLote);
+  document.getElementById('checkAll').addEventListener('change', function() {
+    document.querySelectorAll('.ck-proc').forEach(c => { c.checked = this.checked; });
+  });
+
+  // Upload
+  ['zoneMandado','zoneAnexo'].forEach(zid => {
+    const zone = document.getElementById(zid);
+    zone.addEventListener('click', function() {
+      const inp = this.querySelector('input[type=file]');
+      if (inp) inp.click();
+    });
+    zone.addEventListener('dragover', e => e.preventDefault());
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      const inp = this.querySelector('input[type=file]');
+      if (inp && e.dataTransfer.files[0]) {
+        const dt = new DataTransfer();
+        dt.items.add(e.dataTransfer.files[0]);
+        inp.files = dt.files;
+        updateZoneLabel(this, e.dataTransfer.files[0].name);
+      }
+    });
+  });
+  document.getElementById('fileMandado').addEventListener('change', function() {
+    if (this.files[0]) updateZoneLabel(document.getElementById('zoneMandado'), this.files[0].name);
+  });
+  document.getElementById('fileAnexo').addEventListener('change', function() {
+    if (this.files[0]) updateZoneLabel(document.getElementById('zoneAnexo'), this.files[0].name);
+  });
+  document.getElementById('btnUpload').addEventListener('click', doUpload);
+
+  // Contatos
+  document.getElementById('sCont').addEventListener('input', loadConts);
+  document.getElementById('btnImport').addEventListener('click', doImport);
+  document.getElementById('btnImportSent').addEventListener('click', doImportarEnviados);
+  document.getElementById('btnTestBusca').addEventListener('click', testBusca);
+
+  // Modals
+  document.getElementById('btnModalFechar').addEventListener('click', () => closeModal('modalProc'));
+  document.getElementById('btnEnvCancel').addEventListener('click', () => closeModal('modalEnv'));
+  document.getElementById('btnEnvConfirm').addEventListener('click', confirmarEnvio);
+}
+
+function updateZoneLabel(zone, name) {
+  const lbl = zone.querySelector('div:not(.upload-icon):not(.text2)');
+  if (lbl) lbl.textContent = '\u2705 ' + name;
+  zone.style.borderColor = 'var(--green)';
+}
+
+// ── Status ────────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const d = await fetchJSON(API + '/status');
+    setText('kpiTotal', d.processos || 0);
+    setText('kpiPend', d.pendentes || 0);
+    setText('kpiRasc', d.rascunhos || 0);
+    setText('kpiEnv', Math.max(0, (d.processos||0)-(d.pendentes||0)-(d.rascunhos||0)));
+    setText('contatosLbl', (d.contatos||0) + ' contatos');
+    const dot = document.getElementById('dotOutlook');
+    const lbl = document.getElementById('outlookLbl');
+    if (d.outlook && d.outlook.ok) {
+      dot.className = 'dot dot-green';
+      lbl.innerHTML = '<span class="dot dot-green"></span> Outlook OK';
+    } else {
+      dot.className = 'dot dot-red';
+    }
+  } catch(e) {}
+}
+
+// ── Processos ─────────────────────────────────────────────────────────────
+async function loadProcs() {
+  const st = document.getElementById('fStatus').value;
+  const url = API + '/processos' + (st ? '?status=' + st : '?limit=200');
+  try {
+    const d = await fetchJSON(url);
+    procs = d.processos || [];
+    renderProcs(procs);
+  } catch(e) {
+    renderEmpty('tbProc', 7, 'Erro ao carregar processos');
+  }
+}
+
+function filterProcs() {
+  const q = document.getElementById('sProc').value.toLowerCase();
+  if (!q) return renderProcs(procs);
+  renderProcs(procs.filter(p =>
+    (p.numero_processo||'').toLowerCase().includes(q) ||
+    (p.destinatario||'').toLowerCase().includes(q) ||
+    (p.email_destinatario||'').toLowerCase().includes(q)
+  ));
+}
+
+function renderProcs(list) {
+  const tb = document.getElementById('tbProc');
+  clearEl(tb);
+  if (!list.length) {
+    renderEmpty('tbProc', 7, 'Nenhum processo encontrado');
+    return;
+  }
+  list.forEach(p => {
+    const tr = document.createElement('tr');
+
+    // checkbox
+    const tdCk = document.createElement('td');
+    const ck = document.createElement('input');
+    ck.type = 'checkbox'; ck.className = 'ck-proc'; ck.value = p.id;
+    tdCk.appendChild(ck);
+    tr.appendChild(tdCk);
+
+    // numero
+    const tdNum = document.createElement('td');
+    tdNum.style.cssText = 'font-family:monospace;font-size:12px';
+    tdNum.textContent = p.numero_processo || '–';
+    tr.appendChild(tdNum);
+
+    // destinatario — clique para editar inline
+    const tdDest = document.createElement('td');
+    tdDest.style.cssText = 'max-width:180px;cursor:pointer';
+    tdDest.title = 'Clique para editar';
+    const spanDest = document.createElement('span');
+    spanDest.style.cssText = 'display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    spanDest.textContent = p.destinatario || '–';
+    tdDest.appendChild(spanDest);
+    tdDest.addEventListener('click', () => {
+      if (tdDest.querySelector('input')) return;
+      const val = spanDest.textContent === '–' ? '' : spanDest.textContent;
+      spanDest.style.display = 'none';
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.value = val;
+      inp.style.cssText = 'width:100%;font-size:12px;padding:3px 6px;background:var(--bg3);border:1px solid var(--accent2);color:var(--text);border-radius:4px';
+      tdDest.appendChild(inp);
+      inp.focus(); inp.select();
+      const saveInline = async () => {
+        const novo = inp.value.trim();
+        tdDest.removeChild(inp);
+        spanDest.style.display = '';
+        spanDest.textContent = novo || '–';
+        if (novo !== val) {
+          await patchJSON(API + '/processos/' + p.id, {destinatario: novo});
+          const idx = procs.findIndex(x => x.id === p.id);
+          if (idx >= 0) procs[idx].destinatario = novo;
+        }
+      };
+      inp.addEventListener('blur', saveInline);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', saveInline); tdDest.removeChild(inp); spanDest.style.display = ''; } });
+    });
+    tr.appendChild(tdDest);
+
+    // email — clique para editar inline
+    const tdEmail = document.createElement('td');
+    tdEmail.style.cssText = 'max-width:210px;cursor:pointer';
+    tdEmail.title = 'Clique para editar';
+    const spanEmail = document.createElement('span');
+    spanEmail.style.cssText = 'display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    if (p.email_destinatario) {
+      spanEmail.style.color = 'var(--green)';
+      spanEmail.textContent = p.email_destinatario;
+    } else {
+      spanEmail.style.color = 'var(--red)';
+      spanEmail.textContent = '\u26a0 N\u00e3o encontrado';
+    }
+    tdEmail.appendChild(spanEmail);
+    tdEmail.addEventListener('click', () => {
+      if (tdEmail.querySelector('input')) return;
+      const val = p.email_destinatario || '';
+      spanEmail.style.display = 'none';
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.value = val;
+      inp.style.cssText = 'width:100%;font-size:12px;padding:3px 6px;background:var(--bg3);border:1px solid var(--accent2);color:var(--text);border-radius:4px';
+      tdEmail.appendChild(inp);
+      inp.focus(); inp.select();
+      const saveInline = async () => {
+        const novo = inp.value.trim();
+        tdEmail.removeChild(inp);
+        spanEmail.style.display = '';
+        if (novo) {
+          spanEmail.style.color = 'var(--green)';
+          spanEmail.textContent = novo;
+          p.email_destinatario = novo;
+        } else {
+          spanEmail.style.color = 'var(--red)';
+          spanEmail.textContent = '\u26a0 N\u00e3o encontrado';
+          p.email_destinatario = '';
+        }
+        if (novo !== val) {
+          await patchJSON(API + '/processos/' + p.id, {email_destinatario: novo});
+          const idx = procs.findIndex(x => x.id === p.id);
+          if (idx >= 0) procs[idx].email_destinatario = novo;
+          // Recarrega linha para mostrar botão rascunho se necessário
+          loadProcs();
+        }
+      };
+      inp.addEventListener('blur', saveInline);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', saveInline); tdEmail.removeChild(inp); spanEmail.style.display = ''; } });
+    });
+    tr.appendChild(tdEmail);
+
+    // confianca
+    const tdConf = document.createElement('td');
+    tdConf.appendChild(mkBadge(confLabel(p.email_encontrado_em), confCls(p.email_encontrado_em)));
+    tr.appendChild(tdConf);
+
+    // status
+    const tdSt = document.createElement('td');
+    tdSt.appendChild(stBadge(p.status));
+    tr.appendChild(tdSt);
+
+    // acoes
+    const tdAc = document.createElement('td');
+    const verBtn = document.createElement('button');
+    verBtn.className = 'btn btn-s btn-sm'; verBtn.textContent = 'Ver';
+    verBtn.addEventListener('click', () => openProcModal(p.id));
+    tdAc.appendChild(verBtn);
+    if (p.email_destinatario && p.status !== 'enviado') {
+      const rBtn = document.createElement('button');
+      rBtn.className = 'btn btn-sm'; rBtn.style.cssText = 'background:rgba(34,197,94,.2);color:var(--green);margin-left:4px';
+      rBtn.textContent = '\u2709\ufe0f';
+      rBtn.addEventListener('click', () => criarRascUnico(p.id));
+      tdAc.appendChild(rBtn);
+    }
+    if (p.status === 'rascunho') {
+      const eBtn = document.createElement('button');
+      eBtn.className = 'btn btn-sm'; eBtn.style.cssText = 'background:rgba(34,197,94,.12);color:var(--green);margin-left:4px';
+      eBtn.textContent = '\u2705';
+      eBtn.addEventListener('click', () => abrirModalEnvio(p.id));
+      tdAc.appendChild(eBtn);
+    }
+    tr.appendChild(tdAc);
+
+    tb.appendChild(tr);
+  });
+}
+
+function confLabel(fonte) {
+  if (!fonte || fonte === 'nao_encontrado') return '–';
+  if (fonte.includes('agenda')) return 'Alta';
+  if (fonte.includes('outlook')) return 'M\u00e9dia';
+  return 'Baixa';
+}
+function confCls(fonte) {
+  if (!fonte || fonte === 'nao_encontrado') return 'b-err';
+  if (fonte.includes('agenda')) return 'b-alta';
+  if (fonte.includes('outlook')) return 'b-med';
+  return 'b-baixa';
+}
+function stBadge(s) {
+  const m = {pendente:['b-pend','Pendente'], rascunho:['b-rasc','Rascunho'], enviado:['b-env','Enviado'], erro:['b-err','Erro']};
+  const [cls, lbl] = m[s] || ['b-pend','Pendente'];
+  return mkBadge(lbl, cls);
+}
+function mkBadge(txt, cls) {
+  const s = document.createElement('span');
+  s.className = 'badge ' + cls;
+  s.textContent = txt;
+  return s;
+}
+
+async function criarRascLote() {
+  const ids = [...document.querySelectorAll('.ck-proc:checked')].map(c => parseInt(c.value));
+  if (!ids.length) { showAlert('alertProc', 'Selecione ao menos um processo.', 'warn'); return; }
+  const btn = document.getElementById('btnRascLote');
+  btn.disabled = true; btn.textContent = '\u23f3 Criando...';
+  try {
+    const d = await postJSON(API + '/rascunhos/criar', {processo_ids: ids});
+    if (d.ok) {
+      showAlert('alertProc', '\u2705 ' + d.sucessos + ' rascunho(s) aberto(s) no Outlook.', 'ok');
+      loadProcs(); loadStatus();
+    } else {
+      showAlert('alertProc', d.erro || 'Erro ao criar rascunhos.', 'err');
+    }
+  } catch(e) { showAlert('alertProc', 'Erro de conex\u00e3o.', 'err'); }
+  btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar Rascunhos';
+}
+
+async function criarRascUnico(id) {
+  try {
+    const d = await postJSON(API + '/rascunhos/criar-um/' + id, {});
+    if (d.ok) { showAlert('alertProc', '\u2705 Rascunho aberto no Outlook!', 'ok'); loadProcs(); }
+    else showAlert('alertProc', d.erro || 'Erro.', 'err');
+  } catch(e) { showAlert('alertProc', 'Erro de conex\u00e3o.', 'err'); }
+}
+
+// ── Modal Processo ─────────────────────────────────────────────────────────
+async function openProcModal(id) {
+  try {
+    const p = await fetchJSON(API + '/processos/' + id);
+    procAtual = p;
+    const div = document.getElementById('modalProcContent');
+    clearEl(div);
+
+    const addField = (label, val, id_) => {
+      const lbl = document.createElement('label');
+      lbl.textContent = label;
+      div.appendChild(lbl);
+      if (id_) {
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.id = id_; inp.value = val || '';
+        div.appendChild(inp);
+      } else {
+        const span = document.createElement('div');
+        span.style.cssText = 'font-size:13px;padding:4px 0;color:var(--text)';
+        span.textContent = val || '–';
+        div.appendChild(span);
+      }
+    };
+
+    const row = document.createElement('div');
+    row.className = 'row2';
+    const d1 = document.createElement('div');
+    const d2 = document.createElement('div');
+    const l1 = document.createElement('label'); l1.textContent = 'N\u00famero do Processo';
+    const v1 = document.createElement('div'); v1.style.cssText = 'font-family:monospace;font-size:12px;color:var(--accent2)';
+    v1.textContent = p.numero_processo || '–';
+    const l2 = document.createElement('label'); l2.textContent = 'Tipo';
+    const v2 = document.createElement('div'); v2.style.fontSize = '13px'; v2.textContent = p.tipo || '–';
+    d1.appendChild(l1); d1.appendChild(v1);
+    d2.appendChild(l2); d2.appendChild(v2);
+    row.appendChild(d1); row.appendChild(d2);
+    div.appendChild(row);
+
+    addField('Destinat\u00e1rio', p.destinatario);
+    addField('Endere\u00e7o', p.endereco_destinatario);
+
+    const lEmail = document.createElement('label'); lEmail.textContent = 'E-mail do Destinat\u00e1rio';
+    div.appendChild(lEmail);
+    const rowEmail = document.createElement('div');
+    rowEmail.className = 'flex';
+    const inpEmail = document.createElement('input');
+    inpEmail.type = 'text'; inpEmail.id = 'editEmail'; inpEmail.value = p.email_destinatario || '';
+    inpEmail.style.flex = '1';
+    const btnSaveEmail = document.createElement('button');
+    btnSaveEmail.className = 'btn btn-p btn-sm'; btnSaveEmail.textContent = 'Salvar';
+    btnSaveEmail.addEventListener('click', () => salvarEmailModal(p.id));
+    rowEmail.appendChild(inpEmail); rowEmail.appendChild(btnSaveEmail);
+    div.appendChild(rowEmail);
+    const metaEmail = document.createElement('div');
+    metaEmail.style.cssText = 'font-size:11px;color:var(--text2);margin-top:4px';
+    metaEmail.textContent = 'Fonte: ' + (p.email_encontrado_em || 'manual');
+    div.appendChild(metaEmail);
+
+    addField('Assunto', p.assunto_email, 'editAssunto');
+
+    const lArq = document.createElement('label'); lArq.textContent = 'Arquivos';
+    div.appendChild(lArq);
+    const arqDiv = document.createElement('div');
+    arqDiv.style.cssText = 'color:var(--text2);font-size:12px';
+    arqDiv.textContent = '\uD83D\uDCC4 ' + (p.arquivo_mandado ? p.arquivo_mandado.split('\\').pop() : '–')
+      + '\n\uD83D\uDCCE ' + (p.arquivo_anexo ? p.arquivo_anexo.split('\\').pop() : '–');
+    div.appendChild(arqDiv);
+
+    document.getElementById('btnModalRasc').onclick = () => criarRascModal();
+    openModal('modalProc');
+  } catch(e) {}
+}
+
+async function salvarEmailModal(id) {
+  const email = document.getElementById('editEmail').value.trim();
+  const assunto = document.getElementById('editAssunto').value.trim();
+  await patchJSON(API + '/processos/' + id, {email_destinatario: email, assunto_email: assunto});
+  showAlert('alertProc', '\u2705 E-mail salvo!', 'ok');
+}
+
+async function criarRascModal() {
+  if (!procAtual) return;
+  const email = document.getElementById('editEmail').value.trim();
+  if (email) await patchJSON(API + '/processos/' + procAtual.id, {email_destinatario: email});
+  await criarRascUnico(procAtual.id);
+  closeModal('modalProc');
+}
+
+// ── Modal Envio ────────────────────────────────────────────────────────────
+function abrirModalEnvio(id) {
+  envId = id;
+  const p = procs.find(x => x.id === id);
+  const div = document.getElementById('modalEnvInfo');
+  clearEl(div);
+  if (p) {
+    const er = document.createElement('div');
+    er.className = 'er';
+    const addr = document.createElement('div'); addr.className = 'er-addr'; addr.textContent = p.email_destinatario;
+    const meta = document.createElement('div'); meta.className = 'er-meta';
+    meta.textContent = (p.numero_processo||'') + ' — ' + (p.destinatario||'');
+    er.appendChild(addr); er.appendChild(meta);
+    div.appendChild(er);
+  }
+  openModal('modalEnv');
+}
+
+async function confirmarEnvio() {
+  if (!envId) return;
+  await postJSON(API + '/historico/registrar/' + envId, {});
+  closeModal('modalEnv');
+  envId = null;
+  showAlert('alertProc', '\u2705 Marcado como enviado!', 'ok');
+  loadProcs(); loadStatus();
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────
+async function doUpload() {
+  const mandado = document.getElementById('fileMandado').files[0];
+  if (!mandado) { alert('Selecione o PDF do mandado.'); return; }
+  const btn = document.getElementById('btnUpload');
+  btn.disabled = true; btn.textContent = '\u23f3 Extraindo...';
+  const fd = new FormData();
+  fd.append('mandado', mandado);
+  const anexo = document.getElementById('fileAnexo').files[0];
+  if (anexo) fd.append('anexo', anexo);
+  const resDiv = document.getElementById('uploadRes');
+  resDiv.style.display = 'block';
+  clearEl(resDiv);
+  try {
+    const r = await fetch(API + '/processos/upload-pdf', {method:'POST', body: fd});
+    const d = await r.json();
+    if (d.ok) {
+      const ok = document.createElement('div');
+      ok.className = 'alert a-ok'; ok.textContent = '\u2705 Processo criado com sucesso!';
+      resDiv.appendChild(ok);
+      const er = document.createElement('div'); er.className = 'er';
+      const addr = document.createElement('div'); addr.className = 'er-addr';
+      addr.textContent = d.email || '\u26a0 E-mail n\u00e3o encontrado';
+      const meta = document.createElement('div'); meta.className = 'er-meta';
+      meta.textContent = (d.numero_processo||'–') + ' — ' + (d.destinatario||'') +
+        '\nConfian\u00e7a: ' + (d.email_confianca||'–') + ' | Fonte: ' + (d.email_fonte||'–') +
+        '\nAssunto: ' + (d.assunto||'');
+      er.appendChild(addr); er.appendChild(meta);
+      if (d.sugestoes && d.sugestoes.length) {
+        const sugTit = document.createElement('div');
+        sugTit.style.cssText = 'margin-top:10px;font-size:12px;color:var(--text2)';
+        sugTit.textContent = 'Sugest\u00f5es de e-mail:';
+        er.appendChild(sugTit);
+        d.sugestoes.forEach(s => {
+          const si = document.createElement('div');
+          si.className = 'sug-item';
+          const spn = document.createElement('span'); spn.textContent = s.nome || s.orgao;
+          const spnE = document.createElement('span'); spnE.style.color = 'var(--accent2)'; spnE.textContent = s.email;
+          si.appendChild(spn); si.appendChild(spnE);
+          si.addEventListener('click', () => usarSug(d.id, s.email));
+          er.appendChild(si);
+        });
+      }
+      resDiv.appendChild(er);
+      const btns = document.createElement('div');
+      btns.style.cssText = 'display:flex;gap:10px;margin-top:14px';
+      const b1 = document.createElement('button'); b1.className = 'btn btn-ok';
+      b1.textContent = '\u2709\ufe0f Criar Rascunho no Outlook';
+      b1.addEventListener('click', async () => { await criarRascUnico(d.id); navTo('processos'); });
+      const b2 = document.createElement('button'); b2.className = 'btn btn-s';
+      b2.textContent = 'Ver Lista';
+      b2.addEventListener('click', () => navTo('processos'));
+      btns.appendChild(b1); btns.appendChild(b2);
+      resDiv.appendChild(btns);
+    } else {
+      const err = document.createElement('div');
+      err.className = 'alert a-err';
+      err.textContent = 'Erro: ' + (d.detail || 'Falha ao processar PDF');
+      resDiv.appendChild(err);
+    }
+  } catch(e) {
+    const err = document.createElement('div');
+    err.className = 'alert a-err';
+    err.textContent = 'Erro de conex\u00e3o com o servidor. Verifique se o agente est\u00e1 rodando.';
+    resDiv.appendChild(err);
+  }
+  btn.disabled = false; btn.textContent = '\uD83D\uDD0D Extrair Informa\u00e7\u00f5es e Buscar E-mail';
+}
+
+async function usarSug(id, email) {
+  await patchJSON(API + '/processos/' + id, {email_destinatario: email});
+  navTo('processos');
+}
+
+function navTo(page) {
+  document.querySelectorAll('nav button').forEach(b => {
+    if (b.getAttribute('data-page') === page) b.click();
+  });
+}
+
+// ── Contatos ──────────────────────────────────────────────────────────────
+async function loadConts() {
+  const q = document.getElementById('sCont').value;
+  const url = API + '/contatos' + (q ? '?q=' + encodeURIComponent(q) : '?limit=100');
+  try {
+    const d = await fetchJSON(url);
+    const tb = document.getElementById('tbCont');
+    clearEl(tb);
+    if (!d.contatos || !d.contatos.length) { renderEmpty('tbCont', 5, 'Nenhum contato'); return; }
+    d.contatos.forEach(c => {
+      const tr = document.createElement('tr');
+      const t1 = document.createElement('td');
+      t1.textContent = c.nome || '–';
+      if (c.orgao && c.orgao !== c.nome) {
+        const span = document.createElement('span');
+        span.style.cssText = 'color:var(--text2);font-size:11px'; span.textContent = ' / ' + c.orgao;
+        t1.appendChild(span);
+      }
+      const t2 = document.createElement('td');
+      const a = document.createElement('a'); a.href = 'mailto:' + c.email;
+      a.style.color = 'var(--accent2)'; a.textContent = c.email;
+      t2.appendChild(a);
+      const t3 = document.createElement('td');
+      t3.style.cssText = 'font-size:12px';
+      if (c.tratamento) {
+        const badge = document.createElement('span');
+        badge.style.cssText = 'background:rgba(124,58,237,.18);color:#c4b5fd;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600';
+        badge.textContent = c.tratamento;
+        t3.appendChild(badge);
+      } else {
+        t3.style.color = 'var(--text2)'; t3.textContent = '–';
+      }
+      const t4 = document.createElement('td');
+      t4.style.cssText = 'color:var(--text2);font-size:12px'; t4.textContent = c.categoria || '–';
+      const t5 = document.createElement('td');
+      t5.style.cssText = 'color:var(--text2);font-size:12px'; t5.textContent = c.fonte || '–';
+      tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3); tr.appendChild(t4); tr.appendChild(t5);
+      tb.appendChild(tr);
+    });
+  } catch(e) {}
+}
+
+async function doImport() {
+  showAlert('alertCont', '\u23f3 Importando agendas...', 'info');
+  try {
+    const d = await postJSON(API + '/contatos/importar/sync', {});
+    showAlert('alertCont', '\u2705 Importados: ' + d.importados_docx + ' agendas + ' + d.importados_outlook + ' Outlook', 'ok');
+    loadConts(); loadStatus();
+  } catch(e) { showAlert('alertCont', 'Erro ao importar.', 'err'); }
+}
+
+async function doImportarEnviados() {
+  const btn = document.getElementById('btnImportSent');
+  if (btn) { btn.disabled = true; btn.textContent = '\u23f3 Varrendo enviados...'; }
+  showAlert('alertCont', '\u23f3 Varrendo pasta Enviados do Outlook (pode levar alguns minutos)...', 'info');
+  try {
+    const d = await postJSON(API + '/outlook/importar-enviados', {});
+    if (d.ok) {
+      showAlert('alertCont',
+        '\u2705 Varredura conclu\u00edda: ' + d.total_varredura + ' e-mails lidos, '
+        + d.unicos + ' destinat\u00e1rios \u00fanicos, '
+        + d.inseridos + ' novos, ' + d.atualizados + ' tratamentos atualizados.',
+        'ok');
+      loadConts(); loadStatus();
+    } else {
+      showAlert('alertCont', '\u26a0 ' + (d.erro || 'Erro desconhecido'), 'err');
+    }
+  } catch(e) { showAlert('alertCont', 'Erro ao importar enviados.', 'err'); }
+  if (btn) { btn.disabled = false; btn.textContent = '\uD83D\uDCE4 Importar Enviados (com Tratamento)'; }
+}
+
+async function testBusca() {
+  const nome = document.getElementById('testBusca').value.trim();
+  if (!nome) return;
+  const d = await fetchJSON(API + '/contatos/buscar?nome=' + encodeURIComponent(nome));
+  const el = document.getElementById('testBuscaRes');
+  clearEl(el);
+  const div = document.createElement('div');
+  if (d.email) {
+    div.className = 'er'; div.style.marginTop = '8px';
+    const addr = document.createElement('div'); addr.className = 'er-addr'; addr.textContent = d.email;
+    const meta = document.createElement('div'); meta.className = 'er-meta';
+    meta.textContent = (d.nome||'') + ' — Fonte: ' + (d.fonte||'') + ' — Confian\u00e7a: ' + (d.confianca||'');
+    div.appendChild(addr); div.appendChild(meta);
+  } else {
+    div.className = 'alert a-warn'; div.style.marginTop = '8px';
+    div.textContent = 'E-mail n\u00e3o encontrado para "' + nome + '"';
+  }
+  el.appendChild(div);
+}
+
+// ── Histórico ─────────────────────────────────────────────────────────────
+async function loadHist() {
+  try {
+    const d = await fetchJSON(API + '/historico');
+    const tb = document.getElementById('tbHist');
+    clearEl(tb);
+    if (!d.historico || !d.historico.length) { renderEmpty('tbHist', 5, 'Nenhum e-mail registrado ainda'); return; }
+    d.historico.forEach(h => {
+      const tr = document.createElement('tr');
+      const cols = [
+        h.numero_processo || '–',
+        h.destinatario || '–',
+        h.email || '–',
+        h.assunto || '–',
+        h.enviado_em ? new Date(h.enviado_em).toLocaleString('pt-BR') : '–'
+      ];
+      cols.forEach((val, i) => {
+        const td = document.createElement('td');
+        if (i === 0) td.style.cssText = 'font-family:monospace;font-size:12px';
+        if (i === 4) td.style.cssText = 'color:var(--text2);font-size:12px';
+        if (i === 2) {
+          const a = document.createElement('a'); a.href = 'mailto:' + val;
+          a.style.color = 'var(--accent2)'; a.textContent = val;
+          td.appendChild(a);
+        } else {
+          td.style.maxWidth = '200px';
+          td.style.overflow = 'hidden';
+          td.style.textOverflow = 'ellipsis';
+          td.style.whiteSpace = 'nowrap';
+          td.textContent = val;
+        }
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+  } catch(e) {}
+}
+
+// ── Colar Texto ───────────────────────────────────────────────────────────
+
+let textExtraidos = [];
+
+(function bindTexto() {
+  setTimeout(() => {
+    const btnE = document.getElementById('btnExtrai');
+    const btnL = document.getElementById('btnLimpaTexto');
+    const area = document.getElementById('textoInput');
+    if (btnE) btnE.addEventListener('click', extrairDoTexto);
+    if (btnL) btnL.addEventListener('click', () => {
+      area.value = '';
+      document.getElementById('textoCount').textContent = '';
+      clearEl(document.getElementById('textoRes'));
+      textExtraidos = [];
+    });
+    if (area) area.addEventListener('paste', () => setTimeout(extrairDoTexto, 60));
+  }, 200);
+})();
+
+function extrairNumerosDoTexto(texto) {
+  // Normaliza: substitui traços variantes (–, —, \u2011) por hífen, e pontos variantes
+  const normalizado = texto
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D]/g, '-')
+    .replace(/[\u00B7\u2024\u2025\uFE52\uFF0E]/g, '.')
+    .replace(/\u00A0/g, ' ');  // non-breaking space
+  const pattern = /\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/g;
+  const seen = new Set();
+  const lista = [];
+  const matches = [...normalizado.matchAll(pattern)];
+  matches.forEach(m => {
+    if (seen.has(m[0])) return;
+    seen.add(m[0]);
+    const ini = Math.max(0, m.index - 100);
+    const fim = Math.min(normalizado.length, m.index + m[0].length + 100);
+    const ctx = normalizado.slice(ini, fim).replace(/[\n\r]+/g, ' ').trim();
+    const dest = _extrairDestino(ctx, m[0]);
+    lista.push({ numero: m[0], contexto: ctx, destino: dest, email: '', emailFonte: '', emailConf: '', id: null });
+  });
+  return lista;
+}
+
+function _extrairDestino(ctx, numero) {
+  // Prioriza texto APÓS o número do processo
+  const posNum = ctx.indexOf(numero);
+  const depois = posNum >= 0 ? ctx.slice(posNum + numero.length) : '';
+
+  // Padrões após o número: "- INSS Teresina", "- Destinatário: Banco do Brasil"
+  const padsDepois = [
+    /^\s*[-–:]\s*(?:Intimad[ao]|Destinat[aá]ri[ao]|R[eé]u|Exequente|Executad[ao])\s*:?\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][^,;\n]{3,55})/i,
+    /^\s*[-–(]\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇa-záéíóúàâãêîôõüç\s]{4,50}(?:LTDA|S\.A\.|ME|EPP|EIRELI|INSS|CAIXA|BANCO|MINISTÉRIO|SECRETARIA|PREFEITURA|FGTS|ANATEL))\b/i,
+  ];
+  for (const pad of padsDepois) {
+    const r = depois.match(pad);
+    if (r && r[1]) return _limpar(r[1]);
+  }
+
+  // Fallback: contexto completo com labels explícitas (sem "Para" — muito genérico em PT)
+  const sem = ctx.replace(numero, ' ').trim();
+  const pads = [
+    /(?:Intimad[ao]|Destinat[aá]ri[ao]|R[eé]u|Exequente|Executad[ao])\s*:?\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][^\n,;:]{3,55})/i,
+    /([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇa-záéíóúàâãêîôõüç\s]{4,40}(?:LTDA|S\.A\.|INSS|CAIXA|BANCO|MINISTÉRIO|SECRETARIA|PREFEITURA))\b/,
+  ];
+  for (const pad of pads) {
+    const r = sem.match(pad);
+    if (r && r[1]) return _limpar(r[1]);
+  }
+  return '';
+}
+
+function _limpar(s) {
+  // Remove palavras finais que são lixo: "prazo", "atenciosamente", números soltos etc.
+  const lixo = /\s*(prazo|atenciosamente|prezad|senhor|ofício|ref|obs|até|\d+\s*dias?)[^]*$/i;
+  return s.trim().replace(lixo, '').replace(/[.,;(]+$/, '').trim().slice(0, 60);
+}
+
+async function extrairDoTexto() {
+  const texto = document.getElementById('textoInput').value;
+  if (!texto.trim()) return;
+  textExtraidos = extrairNumerosDoTexto(texto);
+  const countEl = document.getElementById('textoCount');
+  if (!textExtraidos.length) {
+    countEl.textContent = '\u26a0 Nenhum n\u00famero CNJ encontrado';
+    clearEl(document.getElementById('textoRes'));
+    return;
+  }
+  countEl.textContent = textExtraidos.length + ' n\u00famero(s) encontrado(s)';
+  renderTextExtraidos();
+}
+
+function renderTextExtraidos() {
+  const res = document.getElementById('textoRes');
+  clearEl(res);
+  if (!textExtraidos.length) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'table-wrap';
+  const tbl = document.createElement('table');
+  const thead = document.createElement('thead');
+  const hrw = document.createElement('tr');
+  ['#', 'N\u00famero do Processo', 'Destinat\u00e1rio (edit\u00e1vel)', 'E-mail', 'Arquivos PDF'].forEach((h, i) => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    if (i === 0) th.style.width = '30px';
+    if (i === 4) th.style.width = '160px';
+    hrw.appendChild(th);
+  });
+  thead.appendChild(hrw);
+  tbl.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  tbl.appendChild(tbody);
+  wrap.appendChild(tbl);
+  res.appendChild(wrap);
+
+  textExtraidos.forEach((item, idx) => {
+    const tr = document.createElement('tr');
+    tr.id = 'tr-texto-' + idx;
+
+    const tdIdx = document.createElement('td');
+    tdIdx.style.cssText = 'color:var(--text2);font-size:12px';
+    tdIdx.textContent = idx + 1;
+    tr.appendChild(tdIdx);
+
+    const tdNum = document.createElement('td');
+    tdNum.style.cssText = 'font-family:monospace;font-size:12px;color:var(--accent2)';
+    tdNum.textContent = item.numero;
+    if (item.contexto) {
+      const ctx = document.createElement('div');
+      ctx.style.cssText = 'color:var(--text2);font-size:10px;margin-top:2px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      ctx.title = item.contexto;
+      ctx.textContent = item.contexto;
+      tdNum.appendChild(ctx);
+    }
+    tr.appendChild(tdNum);
+
+    const tdDest = document.createElement('td');
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = 'Nome do \u00f3rg\u00e3o/destinat\u00e1rio...';
+    inp.value = item.destino || '';
+    inp.style.cssText = 'width:100%;min-width:160px';
+    inp.addEventListener('change', e => { textExtraidos[idx].destino = e.target.value.trim(); });
+    tdDest.appendChild(inp);
+    tr.appendChild(tdDest);
+
+    const tdEmail = document.createElement('td');
+    tdEmail.id = 'td-email-' + idx;
+    tdEmail.style.cssText = 'font-size:12px;color:var(--text2)';
+    tdEmail.textContent = '\u2014';
+    tr.appendChild(tdEmail);
+
+    // Coluna Arquivos PDF
+    const tdArq = document.createElement('td');
+    tdArq.style.cssText = 'white-space:nowrap';
+
+    const inpM = document.createElement('input');
+    inpM.type = 'file'; inpM.accept = '.pdf';
+    inpM.id = 'inp-mand-' + idx; inpM.style.display = 'none';
+    inpM.addEventListener('change', e => {
+      textExtraidos[idx].mandadoFile = e.target.files[0] || null;
+      const lbl = document.getElementById('lbl-mand-' + idx);
+      if (lbl) lbl.textContent = textExtraidos[idx].mandadoFile ? '\u2705 Mandado' : '\uD83D\uDCCE Mandado';
+      lbl.style.color = textExtraidos[idx].mandadoFile ? 'var(--green)' : 'var(--text2)';
+    });
+
+    const lblM = document.createElement('label');
+    lblM.htmlFor = 'inp-mand-' + idx; lblM.id = 'lbl-mand-' + idx;
+    lblM.textContent = '\uD83D\uDCCE Mandado';
+    lblM.style.cssText = 'cursor:pointer;padding:3px 7px;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text2);display:block;margin-bottom:4px';
+
+    const inpA = document.createElement('input');
+    inpA.type = 'file'; inpA.accept = '.pdf';
+    inpA.id = 'inp-anex-' + idx; inpA.style.display = 'none';
+    inpA.addEventListener('change', e => {
+      textExtraidos[idx].anexoFile = e.target.files[0] || null;
+      const lbl = document.getElementById('lbl-anex-' + idx);
+      if (lbl) lbl.textContent = textExtraidos[idx].anexoFile ? '\u2705 Anexo' : '\uD83D\uDCCE Anexo (opc.)';
+      lbl.style.color = textExtraidos[idx].anexoFile ? 'var(--green)' : 'var(--text2)';
+    });
+
+    const lblA = document.createElement('label');
+    lblA.htmlFor = 'inp-anex-' + idx; lblA.id = 'lbl-anex-' + idx;
+    lblA.textContent = '\uD83D\uDCCE Anexo (opc.)';
+    lblA.style.cssText = 'cursor:pointer;padding:3px 7px;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text2);display:block';
+
+    tdArq.appendChild(inpM); tdArq.appendChild(lblM);
+    tdArq.appendChild(inpA); tdArq.appendChild(lblA);
+    tr.appendChild(tdArq);
+
+    tbody.appendChild(tr);
+  });
+
+  const btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center';
+
+  const btnB = document.createElement('button');
+  btnB.className = 'btn btn-s'; btnB.id = 'btnBuscarEmails';
+  btnB.textContent = '\uD83D\uDD0E Buscar E-mails';
+  btnB.addEventListener('click', buscarEmailsTexto);
+  btns.appendChild(btnB);
+
+  const btnC = document.createElement('button');
+  btnC.className = 'btn btn-p'; btnC.id = 'btnCriarTexto';
+  btnC.textContent = '\uD83D\uDCBE Criar Processos';
+  btnC.addEventListener('click', criarProcessosTexto);
+  btns.appendChild(btnC);
+
+  const btnR = document.createElement('button');
+  btnR.className = 'btn'; btnR.id = 'btnRascTexto';
+  btnR.style.cssText = 'background:rgba(34,197,94,.2);color:var(--green)';
+  btnR.textContent = '\u2709\ufe0f Criar + Abrir Rascunhos';
+  btnR.addEventListener('click', criarEAbrirRascunhos);
+  btns.appendChild(btnR);
+
+  const btnPje = document.createElement('button');
+  btnPje.className = 'btn'; btnPje.id = 'btnPjeDownload';
+  btnPje.style.cssText = 'background:rgba(59,130,246,.2);color:#60a5fa';
+  btnPje.title = 'Abre o Chrome com o PJe e baixa os PDFs automaticamente';
+  btnPje.textContent = '\u2B07\uFE0F Puxar Arquivos do PJe';
+  btnPje.addEventListener('click', puxarArquivosPje);
+  btns.appendChild(btnPje);
+
+  const alertDiv = document.createElement('div');
+  alertDiv.id = 'alertTexto'; alertDiv.style.cssText = 'width:100%;margin-top:8px';
+  res.appendChild(btns);
+  res.appendChild(alertDiv);
+}
+
+async function buscarEmailsTexto() {
+  const btn = document.getElementById('btnBuscarEmails');
+  if (btn) { btn.disabled = true; btn.textContent = '\u23f3 Buscando...'; }
+
+  textExtraidos.forEach((item, idx) => {
+    const inp = document.querySelector('#tr-texto-' + idx + ' input');
+    if (inp) item.destino = inp.value.trim();
+  });
+
+  for (let idx = 0; idx < textExtraidos.length; idx++) {
+    const item = textExtraidos[idx];
+    const tdEmail = document.getElementById('td-email-' + idx);
+    if (!tdEmail) continue;
+
+    if (!item.destino) {
+      clearEl(tdEmail);
+      const w = document.createElement('span');
+      w.style.color = 'var(--yellow)'; w.textContent = '\u26a0 Informe o destinat\u00e1rio';
+      tdEmail.appendChild(w);
+      continue;
+    }
+
+    clearEl(tdEmail);
+    const spin = document.createElement('span');
+    spin.style.color = 'var(--text2)'; spin.textContent = '\u23f3';
+    tdEmail.appendChild(spin);
+
+    try {
+      const d = await fetchJSON(API + '/contatos/buscar?nome=' + encodeURIComponent(item.destino));
+      clearEl(tdEmail);
+      textExtraidos[idx].email = d.email || '';
+      textExtraidos[idx].emailFonte = d.fonte || '';
+      textExtraidos[idx].emailConf = d.confianca || '';
+
+      // input editável (sempre visível)
+      const inp2 = document.createElement('input');
+      inp2.type = 'text';
+      inp2.style.cssText = 'font-size:11px;margin-top:4px;width:100%';
+      const setEmail = (val) => {
+        inp2.value = val;
+        textExtraidos[idx].email = val;
+      };
+
+      if (d.email) {
+        const cor = d.confianca === 'alta' ? 'var(--green)' : d.confianca === 'media' ? 'var(--yellow)' : 'var(--text2)';
+        const eDiv = document.createElement('div');
+        eDiv.style.cssText = 'color:' + cor + ';font-weight:600;font-size:12px';
+        eDiv.textContent = d.email;
+        const fDiv = document.createElement('div');
+        fDiv.style.cssText = 'color:var(--text2);font-size:10px';
+        fDiv.textContent = '\u2713 ' + (d.fonte || d.confianca || '');
+        tdEmail.appendChild(eDiv);
+        tdEmail.appendChild(fDiv);
+        setEmail(d.email);
+      } else {
+        const eDiv = document.createElement('div');
+        eDiv.style.color = 'var(--red)'; eDiv.textContent = '\u2717 N\u00e3o encontrado';
+        tdEmail.appendChild(eDiv);
+        inp2.placeholder = 'Digite o e-mail...';
+      }
+
+      inp2.addEventListener('change', e => { textExtraidos[idx].email = e.target.value.trim(); });
+      tdEmail.appendChild(inp2);
+
+      // sugestões clicáveis
+      const sugs = (d.sugestoes || []).filter(s => s.email && s.email !== d.email);
+      if (sugs.length) {
+        const sugDiv = document.createElement('div');
+        sugDiv.style.cssText = 'margin-top:5px;font-size:10px;color:var(--text2)';
+        sugDiv.textContent = 'Outros:';
+        tdEmail.appendChild(sugDiv);
+        sugs.slice(0, 4).forEach(s => {
+          const btn = document.createElement('button');
+          btn.style.cssText = 'display:block;font-size:10px;color:var(--accent);background:none;border:none;cursor:pointer;padding:1px 0;text-align:left;white-space:nowrap;overflow:hidden;max-width:180px;text-overflow:ellipsis';
+          btn.title = (s.nome || '') + ' — ' + (s.orgao || '');
+          btn.textContent = s.email;
+          btn.addEventListener('click', () => setEmail(s.email));
+          tdEmail.appendChild(btn);
+        });
+      }
+    } catch(e) {
+      clearEl(tdEmail); tdEmail.textContent = 'Erro';
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '\uD83D\uDD0E Buscar E-mails'; }
+}
+
+async function criarProcessosTexto() {
+  textExtraidos.forEach((item, idx) => {
+    const inpDest = document.querySelector('#tr-texto-' + idx + ' input');
+    if (inpDest && !item.destino) item.destino = inpDest.value.trim();
+    const emailInps = document.querySelectorAll('#td-email-' + idx + ' input');
+    if (emailInps.length) item.email = emailInps[emailInps.length - 1].value.trim();
+  });
+
+  const btn = document.getElementById('btnCriarTexto');
+  if (btn) { btn.disabled = true; btn.textContent = '\u23f3 Criando...'; }
+
+  let criados = 0;
+  for (let idx = 0; idx < textExtraidos.length; idx++) {
+    const item = textExtraidos[idx];
+    if (item.id) continue;
+    try {
+      const d = await postJSON(API + '/processos', {
+        numero_processo: item.numero,
+        destinatario: item.destino || '',
+        email_destinatario: item.email || '',
+        assunto_email: item.email ? 'Processo ' + item.numero + ' \u2014 Intima\u00e7\u00e3o' : '',
+      });
+      if (d.ok) { textExtraidos[idx].id = d.id; criados++; }
+    } catch(e) {}
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '\uD83D\uDCBE Criar Processos'; }
+  showAlertTexto('\u2705 ' + criados + ' processo(s) criado(s).', 'ok');
+  loadStatus();
+}
+
+async function criarEAbrirRascunhos() {
+  await criarProcessosTexto();
+
+  const comId = textExtraidos.filter(i => i.id);
+  if (!comId.length) {
+    showAlertTexto('\u26a0 Nenhum processo criado.', 'warn');
+    return;
+  }
+
+  const btn = document.getElementById('btnRascTexto');
+  if (btn) { btn.disabled = true; btn.textContent = '\u23f3 Enviando arquivos...'; }
+
+  // Atualizar e-mail no banco para processos que têm email no frontend mas não no DB
+  for (const item of comId) {
+    // Ler também do input de e-mail caso o usuário tenha digitado manualmente
+    const emailInps = document.querySelectorAll('#td-email-' + textExtraidos.indexOf(item) + ' input');
+    if (emailInps.length) item.email = emailInps[emailInps.length - 1].value.trim() || item.email;
+    if (item.email) {
+      try {
+        await patchJSON(API + '/processos/' + item.id, {
+          email_destinatario: item.email,
+          assunto_email: 'Processo ' + item.numero + ' \u2014 Intima\u00e7\u00e3o',
+        });
+      } catch(e) {}
+    }
+  }
+
+  // Upload PDFs para cada processo que tiver arquivos selecionados
+  for (const item of comId) {
+    if (!item.mandadoFile && !item.anexoFile) continue;
+    try {
+      const fd = new FormData();
+      if (item.mandadoFile) fd.append('mandado', item.mandadoFile);
+      if (item.anexoFile)   fd.append('anexo',   item.anexoFile);
+      await fetch(API + '/processos/' + item.id + '/arquivos', { method: 'POST', body: fd });
+    } catch(e) {}
+  }
+
+  if (btn) btn.textContent = '\u23f3 Abrindo Outlook...';
+
+  try {
+    const d = await postJSON(API + '/rascunhos/criar', { processo_ids: comId.map(i => i.id) });
+    if (d.ok) {
+      const msg = d.sucessos + ' rascunho(s) aberto(s) no Outlook!' +
+        (d.erros && d.erros.length ? ' (' + d.erros.length + ' erro(s))' : '');
+      showAlertTexto('\u2705 ' + msg, 'ok');
+      loadProcs(); loadStatus();
+    } else {
+      showAlertTexto(d.erro || 'Erro ao criar rascunhos.', 'err');
+    }
+  } catch(e) { showAlertTexto('Erro de conex\u00e3o.', 'err'); }
+  if (btn) { btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar + Abrir Rascunhos'; }
+}
+
+async function puxarArquivosPje() {
+  // Primeiro cria/atualiza os processos no banco
+  await criarProcessosTexto();
+  const comId = textExtraidos.filter(i => i.id);
+  if (!comId.length) { showAlertTexto('\u26a0 Crie os processos primeiro.', 'warn'); return; }
+
+  const btn = document.getElementById('btnPjeDownload');
+  if (btn) { btn.disabled = true; btn.textContent = '\u23f3 Abrindo PJe...'; }
+  showAlertTexto('\uD83D\uDD0D Abrindo Chrome com PJe... autorize o certificado se solicitado.', 'ok');
+
+  try {
+    const d = await postJSON(API + '/pje/baixar', { processo_ids: comId.map(i => i.id) });
+    if (d.ok) {
+      const msgDownload = d.sucessos + '/' + d.total + ' arquivo(s) baixado(s) do PJe.';
+
+      // Atualizar coluna de arquivos e coletar IDs com download OK
+      const idsBaixados = [];
+      d.resultados.forEach(r => {
+        if (r.ok) {
+          const idx = textExtraidos.findIndex(i => i.numero === r.numero);
+          if (idx >= 0) {
+            textExtraidos[idx].mandadoFile = '__pje__';
+            const lbl = document.getElementById('lbl-mand-' + idx);
+            if (lbl) { lbl.textContent = '\u2705 Mandado (PJe)'; lbl.style.color = 'var(--green)'; }
+            idsBaixados.push(textExtraidos[idx].id);
+          }
+        }
+      });
+
+      // Abrir rascunhos no Outlook com os PDFs baixados
+      if (idsBaixados.length) {
+        // Atualizar e-mails no banco para os processos que têm email definido
+        for (const item of comId.filter(i => idsBaixados.includes(i.id) && i.email)) {
+          try {
+            await patchJSON(API + '/processos/' + item.id, {
+              email_destinatario: item.email,
+              assunto_email: 'Processo ' + item.numero + ' \u2014 Intima\u00e7\u00e3o',
+            });
+          } catch(e) {}
+        }
+
+        if (btn) btn.textContent = '\u23f3 Abrindo Outlook...';
+        try {
+          const dr = await postJSON(API + '/rascunhos/criar', { processo_ids: idsBaixados });
+          if (dr.ok && dr.sucessos > 0) {
+            showAlertTexto('\u2705 ' + msgDownload + ' ' + dr.sucessos + ' rascunho(s) aberto(s) no Outlook com o PDF em anexo!', 'ok');
+            loadProcs(); loadStatus();
+          } else if (dr.ok && dr.sucessos === 0) {
+            showAlertTexto('\u26a0 PDFs baixados, mas sem e-mail definido. Preencha o e-mail e clique "Criar + Abrir Rascunhos".', 'warn');
+            loadProcs();
+          } else {
+            showAlertTexto('\u2705 ' + msgDownload + ' (Erro ao abrir Outlook: ' + (dr.erro||'') + ')', 'warn');
+          }
+        } catch(e) {
+          showAlertTexto('\u2705 ' + msgDownload + ' (erro ao abrir Outlook)', 'warn');
+        }
+      } else {
+        showAlertTexto(msgDownload, d.sucessos > 0 ? 'ok' : 'warn');
+      }
+    } else {
+      showAlertTexto(d.erro || 'Erro ao baixar do PJe.', 'err');
+    }
+  } catch(e) { showAlertTexto('Erro de conex\u00e3o com o servidor.', 'err'); }
+  if (btn) { btn.disabled = false; btn.textContent = '\u2B07\uFE0F Puxar Arquivos do PJe'; }
+}
+
+function showAlertTexto(msg, type) {
+  const el = document.getElementById('alertTexto');
+  if (!el) return;
+  clearEl(el);
+  const d = document.createElement('div');
+  d.className = 'alert a-' + type; d.textContent = msg;
+  el.appendChild(d);
+  setTimeout(() => clearEl(el), 6000);
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function postJSON(url, body) {
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  return r.json();
+}
+
+async function patchJSON(url, body) {
+  const r = await fetch(url, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  return r.json();
+}
+
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function clearEl(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function renderEmpty(tbId, cols, msg) {
+  const tb = document.getElementById(tbId);
+  const tr = document.createElement('tr');
+  const td = document.createElement('td');
+  td.colSpan = cols; td.className = 'text2';
+  td.style.cssText = 'text-align:center;padding:20px';
+  td.textContent = msg;
+  tr.appendChild(td); tb.appendChild(tr);
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function showAlert(elId, msg, type) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  clearEl(el);
+  const d = document.createElement('div');
+  d.className = 'alert a-' + type;
+  d.textContent = msg;
+  el.appendChild(d);
+  setTimeout(() => clearEl(el), 5000);
+}
+
+// ════════════════════════════════════════════════════════════
+// ESCRITÓRIO VIRTUAL DE IA
+// ════════════════════════════════════════════════════════════
+let escAgenteAtual = null;
+let escConversaAtual = null;
+const ESC_API = '/api/escritorio';
+
+// helpers DOM seguros
+function _el(tag, attrs, children) {
+  const e = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => {
+    if (k === 'className') e.className = v;
+    else if (k === 'style') e.style.cssText = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  });
+  if (children) (Array.isArray(children) ? children : [children]).forEach(c => {
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  });
+  return e;
+}
+function _btn(label, cls, handler) {
+  return _el('button', {className: cls, onclick: handler}, label);
+}
+
+async function escCarregar() {
+  const grid = document.getElementById('agentGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const res = await fetch(ESC_API + '/agentes');
+  const raw = res.ok ? await res.json() : [];
+  const agentes = Array.isArray(raw) ? raw : (raw.agentes || []);
+  if (!agentes.length) {
+    grid.appendChild(_el('p', {style: 'color:var(--text2);text-align:center;padding:40px'}, 'Nenhum agente ainda. Clique em Contratar para adicionar.'));
+    return;
+  }
+  agentes.forEach(a => {
+    const card = _el('div', {className: 'agent-card', style: `--agent-cor:${a.cor || '#7c3aed'}`});
+    const sts = _el('div', {className: 'agent-status ' + (a.status === 'online' ? 'status-online' : 'status-busy')});
+    const av  = _el('div', {className: 'agent-avatar'}, a.avatar || '🤖');
+    const nm  = _el('div', {className: 'agent-name'}, a.nome);
+    const cg  = _el('div', {className: 'agent-cargo'}, a.cargo);
+    const bt  = _btn('💬 Conversar', 'btn btn-sm btn-primary', () => escAbrirChatDados(a));
+    const bd  = _btn('🗑', 'btn btn-sm', () => escDeletarAgente(a.id, a.nome));
+    bd.style.cssText = 'background:rgba(239,68,68,.15);color:#ef4444;margin-left:6px';
+    const actions = _el('div', {style: 'margin-top:10px;display:flex;align-items:center'}, [bt, bd]);
+    [sts, av, nm, cg, actions].forEach(x => card.appendChild(x));
+    card.addEventListener('click', e => { if (!e.target.closest('button')) escAbrirChatDados(a); });
+    grid.appendChild(card);
+  });
+}
+
+function escAbrirChatDados(agente) {
+  escAgenteAtual = agente;
+  const p = document.getElementById('escChatPanel');
+  if (p) { p.style.display = 'flex'; }
+  const n = document.getElementById('escChatName'); if (n) n.textContent = agente.nome;
+  const r = document.getElementById('escChatRole'); if (r) r.textContent = agente.cargo;
+  const av = document.getElementById('escChatAvatar'); if (av) av.textContent = agente.avatar || '🤖';
+  const box = document.getElementById('escMsgs'); if (box) box.innerHTML = '';
+  escConversaAtual = null;
+}
+
+function escFecharChat() {
+  const p = document.getElementById('escChatPanel');
+  if (p) p.style.display = 'none';
+  escAgenteAtual = null;
+}
+
+async function escEnviar() {
+  if (!escAgenteAtual) return;
+  const inp = document.getElementById('escInput');
+  const msg = inp ? inp.value.trim() : '';
+  if (!msg) return;
+  inp.value = '';
+  escAddMsgUI('Você', msg, false);
+  const body = { agente_id: escAgenteAtual.id, mensagem: msg };
+  if (escConversaAtual) body.conversa_id = escConversaAtual;
+  const res = await fetch(ESC_API + '/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    const data = await res.json();
+    if (data.ok === false) {
+      escAddMsgUI('⚠ Sistema', data.erro || 'Erro ao processar', true);
+    } else {
+      escConversaAtual = data.conversa_id;
+      escAddMsgUI(escAgenteAtual.nome, data.resposta, true);
+    }
+  }
+}
+
+function escAddMsgUI(remetente, texto, isAgent) {
+  const box = document.getElementById('escMsgs');
+  if (!box) return;
+  const wrap = _el('div', {className: 'esc-msg ' + (isAgent ? 'esc-msg-agent' : 'esc-msg-user')});
+  const sender = _el('div', {className: 'esc-msg-sender'}, remetente);
+  const body   = _el('div', {className: 'esc-msg-body'}, texto);
+  wrap.appendChild(sender);
+  wrap.appendChild(body);
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function escCarregarTarefas() {
+  const lista = document.getElementById('escTarefaLista');
+  if (!lista) return;
+  const res = await fetch(ESC_API + '/tarefas');
+  const tarefas = res.ok ? await res.json() : [];
+  lista.innerHTML = '';
+  tarefas.forEach(t => {
+    const li = _el('li', {className: 'esc-tarefa' + (t.status === 'concluida' ? ' done' : '')});
+    const chk = _el('input', {type: 'checkbox'});
+    chk.checked = t.status === 'concluida';
+    chk.addEventListener('change', () => escToggleTarefa(t.id, chk.checked));
+    const lbl = _el('span', {}, t.titulo);
+    li.appendChild(chk);
+    li.appendChild(lbl);
+    lista.appendChild(li);
+  });
+}
+
+async function escToggleTarefa(id, done) {
+  await fetch(ESC_API + '/tarefas/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: done ? 'concluida' : 'pendente' })
+  });
+  escCarregarTarefas();
+}
+
+async function escAddTarefa() {
+  const inp = document.getElementById('escNovaTarefa');
+  const titulo = inp ? inp.value.trim() : '';
+  if (!titulo) return;
+  inp.value = '';
+  await fetch(ESC_API + '/tarefas', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ titulo, agente_id: escAgenteAtual ? escAgenteAtual.id : null })
+  });
+  escCarregarTarefas();
+}
+
+async function escCarregarDocs() {
+  const lista = document.getElementById('escDocLista');
+  if (!lista) return;
+  const res = await fetch(ESC_API + '/docs');
+  const docs = res.ok ? await res.json() : [];
+  lista.innerHTML = '';
+  docs.forEach(d => {
+    const item = _el('div', {className: 'esc-doc-item'});
+    const title = _el('strong', {}, d.titulo);
+    const prev = _el('p', {style: 'font-size:12px;color:var(--text2);margin:4px 0 0'}, (d.conteudo || '').slice(0, 80) + (d.conteudo && d.conteudo.length > 80 ? '…' : ''));
+    item.appendChild(title);
+    item.appendChild(prev);
+    lista.appendChild(item);
+  });
+}
+
+async function escAddDoc() {
+  const titInp = document.getElementById('escDocTitulo');
+  const contInp = document.getElementById('escDocConteudo');
+  const titulo = titInp ? titInp.value.trim() : '';
+  const conteudo = contInp ? contInp.value.trim() : '';
+  if (!titulo) return;
+  titInp.value = ''; if (contInp) contInp.value = '';
+  await fetch(ESC_API + '/docs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ titulo, conteudo })
+  });
+  escCarregarDocs();
+}
+
+function escTab(aba, btn) {
+  document.querySelectorAll('.esc-panel').forEach(p => p.style.display = 'none');
+  const target = document.getElementById('esc-panel-' + aba);
+  if (target) target.style.display = 'flex';
+  document.querySelectorAll('.esc-tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  if (aba === 'tarefas') escCarregarTarefas();
+  if (aba === 'docs') escCarregarDocs();
+}
+
+function escContratarAbrir() {
+  const m = document.getElementById('escModal');
+  if (m) m.classList.add('open');
+}
+function escFecharModal() {
+  const m = document.getElementById('escModal');
+  if (m) m.classList.remove('open');
+}
+
+async function escContratar() {
+  const nome  = document.getElementById('escNome')?.value.trim();
+  const cargo = document.getElementById('escCargo')?.value.trim();
+  const avatar= document.getElementById('escAvatar')?.value.trim() || '🤖';
+  const cor   = document.getElementById('escCor')?.value || '#7c3aed';
+  const prompt= document.getElementById('escPrompt')?.value.trim();
+  if (!nome || !cargo) { alert('Nome e cargo são obrigatórios'); return; }
+  await fetch(ESC_API + '/agentes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome, cargo, avatar, cor, system_prompt: prompt })
+  });
+  escFecharModal();
+  escCarregar();
+}
+
+async function escDeletarAgente(id, nome) {
+  if (!confirm('Demitir ' + nome + '?')) return;
+  await fetch(ESC_API + '/agentes/' + id, { method: 'DELETE' });
+  escFecharChat();
+  escCarregar();
+}
+
+async function reuniaoEnviar() {
+  const inp = document.getElementById('reuniaoInput');
+  const msg = inp ? inp.value.trim() : '';
+  if (!msg) return;
+  inp.value = '';
+  reuniaoAddMsg('Você', msg, false);
+  // Envia para todos os agentes em paralelo
+  const res = await fetch(ESC_API + '/agentes');
+  if (!res.ok) return;
+  const raw2 = await res.json();
+  const agentes = Array.isArray(raw2) ? raw2 : (raw2.agentes || []);
+  for (const a of agentes) {
+    const r = await fetch(ESC_API + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agente_id: a.id, mensagem: msg })
+    });
+    if (r.ok) {
+      const d = await r.json();
+      reuniaoAddMsg(a.avatar + ' ' + a.nome, d.resposta, true);
+    }
+  }
+}
+
+function reuniaoAddMsg(remetente, texto, isAgent) {
+  const box = document.getElementById('reuniaoMsgs');
+  if (!box) return;
+  const wrap = _el('div', {className: 'esc-msg ' + (isAgent ? 'esc-msg-agent' : 'esc-msg-user')});
+  const sender = _el('div', {className: 'esc-msg-sender'}, remetente);
+  const body   = _el('div', {className: 'esc-msg-body'}, texto);
+  wrap.appendChild(sender);
+  wrap.appendChild(body);
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+}
+</script>
+</body>
+</html>
