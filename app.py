@@ -30,13 +30,30 @@ from database import DB_PATH, init_db
 from importer import importar_todas
 from pdf_extractor import extrair_info_pdf, montar_assunto, montar_corpo
 from email_matcher import buscar_email_completo, salvar_email_manual, buscar_sugestoes
-from outlook_agent import (
-    criar_rascunho,
-    criar_rascunhos_em_lote,
-    verificar_outlook_disponivel,
-    exportar_contatos_outlook,
-    exportar_enviados_com_tratamento,
-)
+
+# Outlook integration (Windows-only via pywin32)
+OUTLOOK_AVAILABLE = False
+try:
+    from outlook_agent import (
+        criar_rascunho,
+        criar_rascunhos_em_lote,
+        verificar_outlook_disponivel,
+        exportar_contatos_outlook,
+        exportar_enviados_com_tratamento,
+    )
+    OUTLOOK_AVAILABLE = True
+except ImportError:
+    # Linux/Docker: Outlook functions not available
+    def criar_rascunho(**kwargs):
+        return {"ok": False, "erro": "Outlook integration not available on Linux. Use SMTP instead."}
+    def criar_rascunhos_em_lote(processos, **kwargs):
+        return [{"numero_processo": p.get("numero_processo", ""), "email": p.get("email_destinatario", ""), "status": "erro", "msg": "Outlook not available on Linux"} for p in processos]
+    def verificar_outlook_disponivel():
+        return {"ok": False, "erro": "Outlook integration not available on Linux. Use SMTP instead.", "available": False}
+    def exportar_contatos_outlook(**kwargs):
+        return 0
+    def exportar_enviados_com_tratamento(**kwargs):
+        return {"ok": False, "erro": "Outlook integration not available on Linux. Use SMTP instead.", "available": False}
 
 # ── Downloads temporários ────────────────────────────────────────────────────
 DOWNLOADS_DIR = Path(__file__).parent / "downloads"
