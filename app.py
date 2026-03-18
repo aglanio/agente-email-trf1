@@ -26,10 +26,107 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
 from database import DB_PATH, init_db
 from importer import importar_todas
 from pdf_extractor import extrair_info_pdf, montar_assunto, montar_corpo
 from email_matcher import buscar_email_completo, salvar_email_manual, buscar_sugestoes
+
+# ── SMTP Config (funciona em Linux/Docker) ───────────────────────────────────
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.office365.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "aglanio.carvalho@trf1.jus.br")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+REMETENTE = SMTP_USER
+
+
+def enviar_email_smtp(
+    destinatario_email: str,
+    assunto: str,
+    corpo: str,
+    arquivo_mandado: Optional[str] = None,
+    arquivo_anexo: Optional[str] = None,
+    numero_processo: Optional[str] = None,
+) -> dict:
+    """Envia email direto via SMTP (Office 365)."""
+    if not SMTP_PASS:
+        return {"ok": False, "erro": "SMTP_PASS não configurado no .env"}
+    if not destinatario_email:
+        return {"ok": False, "erro": "E-mail do destinatário não encontrado"}
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = REMETENTE
+        msg["To"] = destinatario_email
+        msg["Subject"] = assunto or f"Processo {numero_processo or ''}"
+        msg.attach(MIMEText(corpo or _corpo_padrao_smtp(numero_processo), "plain", "utf-8"))
+
+        # Anexar arquivos
+        for filepath in [arquivo_mandado, arquivo_anexo]:
+            if filepath and Path(filepath).exists():
+                part = MIMEBase("application", "octet-stream")
+                with open(filepath, "rb") as f:
+                    part.set_payload(f.read())
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", f"attachment; filename={Path(filepath).name}")
+                msg.attach(part)
+
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(REMETENTE, destinatario_email, msg.as_string())
+        server.quit()
+
+        return {
+            "ok": True,
+            "msg": f"E-mail enviado para {destinatario_email}",
+            "assunto": assunto,
+            "mode": "smtp",
+        }
+    except Exception as e:
+        return {"ok": False, "erro": f"Erro SMTP: {str(e)}"}
+
+
+def _corpo_padrao_smtp(numero_processo: Optional[str] = None) -> str:
+    from datetime import date
+    proc = numero_processo or "[número do processo]"
+    meses = ["janeiro","fevereiro","março","abril","maio","junho",
+             "julho","agosto","setembro","outubro","novembro","dezembro"]
+    hoje = date.today()
+    data_str = f"Teresina, {hoje.day} de {meses[hoje.month-1]} de {hoje.year}"
+    return f"""{data_str}
+
+Prezado(a) Senhor(a),
+
+Encaminhamos em anexo o mandado judicial referente ao processo {proc}, expedido pela Seção Judiciária do Piauí - SJPI.
+
+Atenciosamente,
+
+Aglanio Frota Moura Carvalho
+Oficial de Justiça Avaliador Federal     PI100327
+Seção Judiciária do Piauí - TRF 1ª Região
+aglanio.carvalho@trf1.jus.br
+"""
+
+
+def verificar_smtp() -> dict:
+    """Verifica se SMTP está configurado e funcional."""
+    if not SMTP_PASS:
+        return {"ok": False, "erro": "SMTP_PASS não configurado", "available": False}
+    try:
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.quit()
+        return {"ok": True, "available": True, "mode": "smtp", "host": SMTP_HOST, "user": SMTP_USER}
+    except Exception as e:
+        return {"ok": False, "erro": str(e), "available": False}
+
 
 # Outlook integration (Windows-only via pywin32)
 OUTLOOK_AVAILABLE = False
@@ -43,17 +140,50 @@ try:
     )
     OUTLOOK_AVAILABLE = True
 except ImportError:
-    # Linux/Docker: Outlook functions not available
+    # Linux/Docker: use SMTP fallback
     def criar_rascunho(**kwargs):
-        return {"ok": False, "erro": "Outlook integration not available on Linux. Use SMTP instead."}
+        return enviar_email_smtp(**kwargs)
     def criar_rascunhos_em_lote(processos, **kwargs):
-        return [{"numero_processo": p.get("numero_processo", ""), "email": p.get("email_destinatario", ""), "status": "erro", "msg": "Outlook not available on Linux"} for p in processos]
+        resultados = []
+        for p in processos:
+            email = p.get("email_destinatario", "")
+            if not email:
+                resultados.append({"numero_processo": p.get("numero_processo", ""), "email": email, "status": "erro", "msg": "E-mail do destinatário não encontrado"})
+                continue
+            from pdf_extractor import montar_corpo
+            corpo = montar_corpo(p)
+            res = enviar_email_smtp(
+                destinatario_email=email,
+                assunto=p.get("assunto_email", ""),
+                corpo=corpo,
+                arquivo_mandado=p.get("arquivo_mandado"),
+                arquivo_anexo=p.get("arquivo_anexo"),
+                numero_processo=p.get("numero_processo"),
+            )
+            if res["ok"]:
+                resultados.append({"numero_processo": p.get("numero_processo", ""), "email": email, "status": "rascunho_aberto", "msg": res["msg"]})
+                _atualizar_status_processo_db(p.get("id"), "enviado")
+            else:
+                resultados.append({"numero_processo": p.get("numero_processo", ""), "email": email, "status": "erro", "msg": res.get("erro", "Erro")})
+        return resultados
     def verificar_outlook_disponivel():
-        return {"ok": False, "erro": "Outlook integration not available on Linux. Use SMTP instead.", "available": False}
+        return verificar_smtp()
     def exportar_contatos_outlook(**kwargs):
         return 0
     def exportar_enviados_com_tratamento(**kwargs):
-        return {"ok": False, "erro": "Outlook integration not available on Linux. Use SMTP instead.", "available": False}
+        return {"ok": False, "erro": "Outlook não disponível em Linux. Contatos devem ser importados via agenda DOCX."}
+
+
+def _atualizar_status_processo_db(processo_id, status):
+    if not processo_id:
+        return
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE processos SET status = ? WHERE id = ?", (status, processo_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 # ── Downloads temporários ────────────────────────────────────────────────────
 DOWNLOADS_DIR = Path(__file__).parent / "downloads"
@@ -472,11 +602,149 @@ def criar_rascunho_unico(processo_id: int):
 
     if res["ok"]:
         conn = sqlite3.connect(DB_PATH)
-        conn.execute("UPDATE processos SET status = 'rascunho' WHERE id = ?", (processo_id,))
+        status_novo = "enviado" if res.get("mode") == "smtp" else "rascunho"
+        conn.execute(f"UPDATE processos SET status = '{status_novo}' WHERE id = ?", (processo_id,))
         conn.commit()
         conn.close()
 
     return res
+
+
+# ── Envio direto via SMTP ────────────────────────────────────────────────────
+
+class EnvioRequest(BaseModel):
+    processo_ids: list[int]
+
+@app.post("/api/email/enviar/{processo_id}")
+def enviar_email_endpoint(processo_id: int):
+    """Envia e-mail direto via SMTP para um processo."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM processos WHERE id = ?", (processo_id,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(404, "Processo não encontrado")
+
+    p = dict(row)
+    if not p.get("email_destinatario"):
+        raise HTTPException(400, "E-mail do destinatário não encontrado")
+
+    from pdf_extractor import montar_corpo
+    corpo = montar_corpo(p)
+
+    res = enviar_email_smtp(
+        destinatario_email=p["email_destinatario"],
+        assunto=p.get("assunto_email", ""),
+        corpo=corpo,
+        arquivo_mandado=p.get("arquivo_mandado"),
+        arquivo_anexo=p.get("arquivo_anexo"),
+        numero_processo=p.get("numero_processo"),
+    )
+
+    if res["ok"]:
+        # Registra envio e atualiza status
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE processos SET status = 'enviado' WHERE id = ?", (processo_id,))
+        conn.execute(
+            """INSERT INTO emails_enviados
+               (processo_id, numero_processo, destinatario, email, assunto, arquivo_mandado, arquivo_anexo, enviado_em)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (processo_id, p.get("numero_processo", ""), p.get("destinatario", ""),
+             p["email_destinatario"], p.get("assunto_email", ""),
+             p.get("arquivo_mandado", ""), p.get("arquivo_anexo", ""),
+             datetime.now().isoformat()),
+        )
+        conn.commit()
+        conn.close()
+
+    return res
+
+
+@app.post("/api/email/enviar-lote")
+def enviar_email_lote(data: EnvioRequest):
+    """Envia e-mails em lote via SMTP."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    resultados = []
+    for pid in data.processo_ids:
+        cur.execute("SELECT * FROM processos WHERE id = ?", (pid,))
+        row = cur.fetchone()
+        if not row:
+            continue
+        p = dict(row)
+        if not p.get("email_destinatario"):
+            resultados.append({"numero_processo": p.get("numero_processo", ""), "email": "", "status": "erro", "msg": "Sem e-mail"})
+            continue
+
+        from pdf_extractor import montar_corpo
+        corpo = montar_corpo(p)
+        res = enviar_email_smtp(
+            destinatario_email=p["email_destinatario"],
+            assunto=p.get("assunto_email", ""),
+            corpo=corpo,
+            arquivo_mandado=p.get("arquivo_mandado"),
+            arquivo_anexo=p.get("arquivo_anexo"),
+            numero_processo=p.get("numero_processo"),
+        )
+        if res["ok"]:
+            conn.execute("UPDATE processos SET status = 'enviado' WHERE id = ?", (pid,))
+            conn.execute(
+                """INSERT INTO emails_enviados
+                   (processo_id, numero_processo, destinatario, email, assunto, arquivo_mandado, arquivo_anexo, enviado_em)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (pid, p.get("numero_processo", ""), p.get("destinatario", ""),
+                 p["email_destinatario"], p.get("assunto_email", ""),
+                 p.get("arquivo_mandado", ""), p.get("arquivo_anexo", ""),
+                 datetime.now().isoformat()),
+            )
+            resultados.append({"numero_processo": p.get("numero_processo", ""), "email": p["email_destinatario"], "status": "enviado", "msg": res["msg"]})
+        else:
+            resultados.append({"numero_processo": p.get("numero_processo", ""), "email": p.get("email_destinatario", ""), "status": "erro", "msg": res.get("erro", "Erro")})
+
+    conn.commit()
+    conn.close()
+
+    sucessos = sum(1 for r in resultados if r["status"] == "enviado")
+    return {"ok": True, "total": len(resultados), "sucessos": sucessos, "erros": [r for r in resultados if r["status"] == "erro"], "resultados": resultados}
+
+
+@app.get("/api/email/preview/{processo_id}")
+def preview_email(processo_id: int):
+    """Retorna preview do e-mail sem enviar."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM processos WHERE id = ?", (processo_id,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(404, "Processo não encontrado")
+
+    p = dict(row)
+    from pdf_extractor import montar_corpo
+    corpo = montar_corpo(p)
+    anexos = []
+    if p.get("arquivo_mandado") and Path(p["arquivo_mandado"]).exists():
+        anexos.append(Path(p["arquivo_mandado"]).name)
+    if p.get("arquivo_anexo") and Path(p["arquivo_anexo"]).exists():
+        anexos.append(Path(p["arquivo_anexo"]).name)
+
+    return {
+        "ok": True,
+        "preview": {
+            "to": p.get("email_destinatario", ""),
+            "from": REMETENTE,
+            "subject": p.get("assunto_email", f"Processo {p.get('numero_processo', '')}"),
+            "body": corpo,
+            "attachments": anexos,
+        }
+    }
 
 
 # ── Histórico de enviados ─────────────────────────────────────────────────────

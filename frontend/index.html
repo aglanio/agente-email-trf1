@@ -135,7 +135,8 @@
           <option value="rascunho">Rascunho</option>
           <option value="enviado">Enviado</option>
         </select>
-        <button class="btn btn-p" id="btnRascLote">&#9993;&#65039; Criar Rascunhos</button>
+        <button class="btn btn-p" id="btnRascLote">&#9993;&#65039; Enviar E-mails</button>
+        <button class="btn btn-s" id="btnPreviewLote" title="Ver preview antes de enviar">&#128065; Preview</button>
         <button class="btn btn-s" id="btnRefresh">&#8635;</button>
       </div>
       <div id="alertProc"></div>
@@ -390,7 +391,7 @@
     <div id="modalProcContent"></div>
     <div class="modal-footer">
       <button class="btn btn-s" id="btnModalFechar">Fechar</button>
-      <button class="btn btn-ok" id="btnModalRasc">&#9993;&#65039; Criar Rascunho no Outlook</button>
+      <button class="btn btn-ok" id="btnModalRasc">📧 Enviar E-mail</button>
     </div>
   </div>
 </div>
@@ -448,7 +449,8 @@ function bindEvents() {
   document.getElementById('sProc').addEventListener('input', filterProcs);
   document.getElementById('fStatus').addEventListener('change', loadProcs);
   document.getElementById('btnRefresh').addEventListener('click', loadProcs);
-  document.getElementById('btnRascLote').addEventListener('click', criarRascLote);
+  document.getElementById('btnRascLote').addEventListener('click', enviarEmailLote);
+  document.getElementById('btnPreviewLote').addEventListener('click', previewLote);
   document.getElementById('checkAll').addEventListener('change', function() {
     document.querySelectorAll('.ck-proc').forEach(c => { c.checked = this.checked; });
   });
@@ -658,23 +660,23 @@ function renderProcs(list) {
 
     // acoes
     const tdAc = document.createElement('td');
+    tdAc.style.whiteSpace = 'nowrap';
     const verBtn = document.createElement('button');
     verBtn.className = 'btn btn-s btn-sm'; verBtn.textContent = 'Ver';
     verBtn.addEventListener('click', () => openProcModal(p.id));
     tdAc.appendChild(verBtn);
     if (p.email_destinatario && p.status !== 'enviado') {
-      const rBtn = document.createElement('button');
-      rBtn.className = 'btn btn-sm'; rBtn.style.cssText = 'background:rgba(34,197,94,.2);color:var(--green);margin-left:4px';
-      rBtn.textContent = '\u2709\ufe0f';
-      rBtn.addEventListener('click', () => criarRascUnico(p.id));
-      tdAc.appendChild(rBtn);
+      const envBtn = document.createElement('button');
+      envBtn.className = 'btn btn-sm'; envBtn.style.cssText = 'background:rgba(34,197,94,.2);color:var(--green);margin-left:4px';
+      envBtn.textContent = '📧 Enviar';
+      envBtn.addEventListener('click', () => enviarEmailUnico(p.id));
+      tdAc.appendChild(envBtn);
     }
-    if (p.status === 'rascunho') {
-      const eBtn = document.createElement('button');
-      eBtn.className = 'btn btn-sm'; eBtn.style.cssText = 'background:rgba(34,197,94,.12);color:var(--green);margin-left:4px';
-      eBtn.textContent = '\u2705';
-      eBtn.addEventListener('click', () => abrirModalEnvio(p.id));
-      tdAc.appendChild(eBtn);
+    if (p.status === 'enviado') {
+      const okBadge = document.createElement('span');
+      okBadge.style.cssText = 'margin-left:4px;font-size:11px;color:var(--green)';
+      okBadge.textContent = '✅ Enviado';
+      tdAc.appendChild(okBadge);
     }
     tr.appendChild(tdAc);
 
@@ -706,30 +708,69 @@ function mkBadge(txt, cls) {
   return s;
 }
 
-async function criarRascLote() {
+async function enviarEmailLote() {
   const ids = [...document.querySelectorAll('.ck-proc:checked')].map(c => parseInt(c.value));
   if (!ids.length) { showAlert('alertProc', 'Selecione ao menos um processo.', 'warn'); return; }
+  if (!confirm('Enviar e-mail para ' + ids.length + ' processo(s) selecionados?')) return;
   const btn = document.getElementById('btnRascLote');
-  btn.disabled = true; btn.textContent = '\u23f3 Criando...';
+  btn.disabled = true; btn.textContent = '\u23f3 Enviando...';
   try {
-    const d = await postJSON(API + '/rascunhos/criar', {processo_ids: ids});
+    const d = await postJSON(API + '/email/enviar-lote', {processo_ids: ids});
     if (d.ok) {
-      showAlert('alertProc', '\u2705 ' + d.sucessos + ' rascunho(s) aberto(s) no Outlook.', 'ok');
+      showAlert('alertProc', '\u2705 ' + d.sucessos + ' e-mail(s) enviado(s) com sucesso!' + (d.erros.length ? ' (' + d.erros.length + ' erro(s))' : ''), 'ok');
       loadProcs(); loadStatus();
     } else {
-      showAlert('alertProc', d.erro || 'Erro ao criar rascunhos.', 'err');
+      showAlert('alertProc', d.erro || 'Erro ao enviar e-mails.', 'err');
     }
-  } catch(e) { showAlert('alertProc', 'Erro de conex\u00e3o.', 'err'); }
-  btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar Rascunhos';
+  } catch(e) { showAlert('alertProc', 'Erro de conexão.', 'err'); }
+  btn.disabled = false; btn.textContent = '\u2709\ufe0f Enviar E-mails';
 }
 
-async function criarRascUnico(id) {
+async function enviarEmailUnico(id) {
   try {
-    const d = await postJSON(API + '/rascunhos/criar-um/' + id, {});
-    if (d.ok) { showAlert('alertProc', '\u2705 Rascunho aberto no Outlook!', 'ok'); loadProcs(); }
-    else showAlert('alertProc', d.erro || 'Erro.', 'err');
-  } catch(e) { showAlert('alertProc', 'Erro de conex\u00e3o.', 'err'); }
+    // Primeiro mostra preview
+    const prev = await fetchJSON(API + '/email/preview/' + id);
+    if (prev.ok) {
+      const p = prev.preview;
+      const confirma = confirm(
+        'Enviar e-mail?\n\nPara: ' + p.to +
+        '\nAssunto: ' + p.subject +
+        '\nAnexos: ' + (p.attachments.length ? p.attachments.join(', ') : 'nenhum') +
+        '\n\n(Clique OK para enviar)'
+      );
+      if (!confirma) return;
+    }
+    const d = await fetchJSON(API + '/email/enviar/' + id);
+    if (!d.ok) {
+      // Tenta via POST
+      const d2 = await postJSON(API + '/email/enviar/' + id, {});
+      if (d2.ok) { showAlert('alertProc', '\u2705 E-mail enviado com sucesso!', 'ok'); loadProcs(); loadStatus(); }
+      else showAlert('alertProc', d2.erro || 'Erro ao enviar.', 'err');
+      return;
+    }
+    showAlert('alertProc', '\u2705 E-mail enviado com sucesso!', 'ok');
+    loadProcs(); loadStatus();
+  } catch(e) { showAlert('alertProc', 'Erro de conexão.', 'err'); }
 }
+
+async function previewLote() {
+  const ids = [...document.querySelectorAll('.ck-proc:checked')].map(c => parseInt(c.value));
+  if (!ids.length) { showAlert('alertProc', 'Selecione ao menos um processo.', 'warn'); return; }
+  let previewText = '';
+  for (const id of ids) {
+    try {
+      const d = await fetchJSON(API + '/email/preview/' + id);
+      if (d.ok) {
+        previewText += 'Para: ' + d.preview.to + '\nAssunto: ' + d.preview.subject + '\nAnexos: ' + (d.preview.attachments.join(', ') || 'nenhum') + '\n---\n';
+      }
+    } catch(e) {}
+  }
+  alert('Preview dos e-mails:\n\n' + (previewText || 'Nenhum e-mail disponível'));
+}
+
+// Mantém compatibilidade com chamadas antigas
+async function criarRascLote() { return enviarEmailLote(); }
+async function criarRascUnico(id) { return enviarEmailUnico(id); }
 
 // ── Modal Processo ─────────────────────────────────────────────────────────
 async function openProcModal(id) {
@@ -814,8 +855,9 @@ async function salvarEmailModal(id) {
 async function criarRascModal() {
   if (!procAtual) return;
   const email = document.getElementById('editEmail').value.trim();
-  if (email) await patchJSON(API + '/processos/' + procAtual.id, {email_destinatario: email});
-  await criarRascUnico(procAtual.id);
+  const assunto = document.getElementById('editAssunto').value.trim();
+  if (email) await patchJSON(API + '/processos/' + procAtual.id, {email_destinatario: email, assunto_email: assunto});
+  await enviarEmailUnico(procAtual.id);
   closeModal('modalProc');
 }
 
@@ -893,8 +935,8 @@ async function doUpload() {
       const btns = document.createElement('div');
       btns.style.cssText = 'display:flex;gap:10px;margin-top:14px';
       const b1 = document.createElement('button'); b1.className = 'btn btn-ok';
-      b1.textContent = '\u2709\ufe0f Criar Rascunho no Outlook';
-      b1.addEventListener('click', async () => { await criarRascUnico(d.id); navTo('processos'); });
+      b1.textContent = '📧 Enviar E-mail';
+      b1.addEventListener('click', async () => { await enviarEmailUnico(d.id); navTo('processos'); });
       const b2 = document.createElement('button'); b2.className = 'btn btn-s';
       b2.textContent = 'Ver Lista';
       b2.addEventListener('click', () => navTo('processos'));
@@ -1265,7 +1307,7 @@ function renderTextExtraidos() {
   const btnR = document.createElement('button');
   btnR.className = 'btn'; btnR.id = 'btnRascTexto';
   btnR.style.cssText = 'background:rgba(34,197,94,.2);color:var(--green)';
-  btnR.textContent = '\u2709\ufe0f Criar + Abrir Rascunhos';
+  btnR.textContent = '📧 Criar + Enviar E-mails';
   btnR.addEventListener('click', criarEAbrirRascunhos);
   btns.appendChild(btnR);
 
@@ -1440,20 +1482,20 @@ async function criarEAbrirRascunhos() {
     } catch(e) {}
   }
 
-  if (btn) btn.textContent = '\u23f3 Abrindo Outlook...';
+  if (btn) btn.textContent = '\u23f3 Enviando e-mails...';
 
   try {
-    const d = await postJSON(API + '/rascunhos/criar', { processo_ids: comId.map(i => i.id) });
+    const d = await postJSON(API + '/email/enviar-lote', { processo_ids: comId.map(i => i.id) });
     if (d.ok) {
-      const msg = d.sucessos + ' rascunho(s) aberto(s) no Outlook!' +
+      const msg = d.sucessos + ' e-mail(s) enviado(s) com sucesso!' +
         (d.erros && d.erros.length ? ' (' + d.erros.length + ' erro(s))' : '');
       showAlertTexto('\u2705 ' + msg, 'ok');
       loadProcs(); loadStatus();
     } else {
-      showAlertTexto(d.erro || 'Erro ao criar rascunhos.', 'err');
+      showAlertTexto(d.erro || 'Erro ao enviar e-mails.', 'err');
     }
-  } catch(e) { showAlertTexto('Erro de conex\u00e3o.', 'err'); }
-  if (btn) { btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar + Abrir Rascunhos'; }
+  } catch(e) { showAlertTexto('Erro de conexão.', 'err'); }
+  if (btn) { btn.disabled = false; btn.textContent = '📧 Criar + Enviar E-mails'; }
 }
 
 async function puxarArquivosPje() {
@@ -1497,20 +1539,20 @@ async function puxarArquivosPje() {
           } catch(e) {}
         }
 
-        if (btn) btn.textContent = '\u23f3 Abrindo Outlook...';
+        if (btn) btn.textContent = '\u23f3 Enviando e-mails...';
         try {
-          const dr = await postJSON(API + '/rascunhos/criar', { processo_ids: idsBaixados });
+          const dr = await postJSON(API + '/email/enviar-lote', { processo_ids: idsBaixados });
           if (dr.ok && dr.sucessos > 0) {
-            showAlertTexto('\u2705 ' + msgDownload + ' ' + dr.sucessos + ' rascunho(s) aberto(s) no Outlook com o PDF em anexo!', 'ok');
+            showAlertTexto('\u2705 ' + msgDownload + ' ' + dr.sucessos + ' e-mail(s) enviado(s) com PDF em anexo!', 'ok');
             loadProcs(); loadStatus();
           } else if (dr.ok && dr.sucessos === 0) {
-            showAlertTexto('\u26a0 PDFs baixados, mas sem e-mail definido. Preencha o e-mail e clique "Criar + Abrir Rascunhos".', 'warn');
+            showAlertTexto('\u26a0 PDFs baixados, mas sem e-mail definido. Preencha o e-mail e clique "Criar + Enviar E-mails".', 'warn');
             loadProcs();
           } else {
-            showAlertTexto('\u2705 ' + msgDownload + ' (Erro ao abrir Outlook: ' + (dr.erro||'') + ')', 'warn');
+            showAlertTexto('\u2705 ' + msgDownload + ' (Erro ao enviar: ' + (dr.erro||'') + ')', 'warn');
           }
         } catch(e) {
-          showAlertTexto('\u2705 ' + msgDownload + ' (erro ao abrir Outlook)', 'warn');
+          showAlertTexto('\u2705 ' + msgDownload + ' (erro ao enviar e-mails)', 'warn');
         }
       } else {
         showAlertTexto(msgDownload, d.sucessos > 0 ? 'ok' : 'warn');
