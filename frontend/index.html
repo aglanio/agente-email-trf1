@@ -1659,70 +1659,25 @@ async function criarEAbrirRascunhos() {
   if (btn) { btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar + Abrir no Outlook'; }
 }
 
-async function puxarArquivosPje() {
-  // Primeiro cria/atualiza os processos no banco
-  await criarProcessosTexto();
-  const comId = textExtraidos.filter(i => i.id);
-  if (!comId.length) { showAlertTexto('\u26a0 Crie os processos primeiro.', 'warn'); return; }
+function puxarArquivosPje() {
+  // Abre o PJe no grau correto — mesmo princípio do Outlook
+  // Detecta grau: se algum processo tem grau 2, abre 2G; senão abre 1G
+  const graus = new Set();
+  textExtraidos.forEach(item => graus.add(item.grau || 1));
 
-  const btn = document.getElementById('btnPjeDownload');
-  if (btn) { btn.disabled = true; btn.textContent = '\u23f3 Abrindo PJe...'; }
-  showAlertTexto('\uD83D\uDD0D Abrindo Chrome com PJe... autorize o certificado se solicitado.', 'ok');
-
-  try {
-    const d = await postJSON(API + '/pje/baixar', { processo_ids: comId.map(i => i.id) });
-    if (d.ok) {
-      const msgDownload = d.sucessos + '/' + d.total + ' arquivo(s) baixado(s) do PJe.';
-
-      // Atualizar coluna de arquivos e coletar IDs com download OK
-      const idsBaixados = [];
-      d.resultados.forEach(r => {
-        if (r.ok) {
-          const idx = textExtraidos.findIndex(i => i.numero === r.numero);
-          if (idx >= 0) {
-            textExtraidos[idx].mandadoFile = '__pje__';
-            const lbl = document.getElementById('lbl-mand-' + idx);
-            if (lbl) { lbl.textContent = '\u2705 Mandado (PJe)'; lbl.style.color = 'var(--green)'; }
-            idsBaixados.push(textExtraidos[idx].id);
-          }
-        }
-      });
-
-      // Abrir rascunhos no Outlook com os PDFs baixados
-      if (idsBaixados.length) {
-        // Atualizar e-mails no banco para os processos que têm email definido
-        for (const item of comId.filter(i => idsBaixados.includes(i.id) && i.email)) {
-          try {
-            await patchJSON(API + '/processos/' + item.id, {
-              email_destinatario: item.email,
-              assunto_email: 'Processo ' + item.numero + ' \u2014 Intima\u00e7\u00e3o',
-            });
-          } catch(e) {}
-        }
-
-        if (btn) btn.textContent = '\u23f3 Enviando e-mails...';
-        try {
-          const dr = await postJSON(API + '/email/enviar-lote', { processo_ids: idsBaixados });
-          if (dr.ok && dr.sucessos > 0) {
-            showAlertTexto('\u2705 ' + msgDownload + ' ' + dr.sucessos + ' e-mail(s) enviado(s) com PDF em anexo!', 'ok');
-            loadProcs(); loadStatus();
-          } else if (dr.ok && dr.sucessos === 0) {
-            showAlertTexto('\u26a0 PDFs baixados, mas sem e-mail definido. Preencha o e-mail e clique "Criar + Abrir no Outlook".', 'warn');
-            loadProcs();
-          } else {
-            showAlertTexto('\u2705 ' + msgDownload + ' (Erro ao enviar: ' + (dr.erro||'') + ')', 'warn');
-          }
-        } catch(e) {
-          showAlertTexto('\u2705 ' + msgDownload + ' (erro ao enviar e-mails)', 'warn');
-        }
-      } else {
-        showAlertTexto(msgDownload, d.sucessos > 0 ? 'ok' : 'warn');
-      }
-    } else {
-      showAlertTexto(d.erro || 'Erro ao baixar do PJe.', 'err');
-    }
-  } catch(e) { showAlertTexto('Erro de conex\u00e3o com o servidor.', 'err'); }
-  if (btn) { btn.disabled = false; btn.textContent = '\u2B07\uFE0F Puxar Arquivos do PJe'; }
+  let abertos = 0;
+  if (graus.has(1)) {
+    window.open('https://pje1g.trf1.jus.br/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam', '_blank');
+    abertos++;
+  }
+  if (graus.has(2)) {
+    window.open('https://pje2g.trf1.jus.br/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam', '_blank');
+    abertos++;
+  }
+  if (!abertos) {
+    window.open('https://pje1g.trf1.jus.br/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam', '_blank');
+  }
+  showAlertTexto('\u2705 PJe aberto! Clique em Imprimir (\ud83d\udda8\ufe0f) e Gerar PDF para baixar os arquivos.', 'ok');
 }
 
 function showAlertTexto(msg, type) {

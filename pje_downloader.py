@@ -48,26 +48,39 @@ async def baixar_documentos_pje(
     resultados = []
 
     async with async_playwright() as pw:
-        # Abre Chrome com perfil do usuário (certificado + sessão)
-        try:
-            browser = await pw.chromium.launch(
-                channel="chrome",
-                headless=False,
-                args=["--no-sandbox"],
-            )
-            context = await browser.new_context(
-                accept_downloads=True,
-            )
-        except Exception as e:
-            # Fallback: tenta Chromium sem perfil
-            try:
-                browser = await pw.chromium.launch(headless=False)
-                context = await browser.new_context(accept_downloads=True)
-            except Exception as e2:
-                return [{"numero_processo": p.get("numero_processo", ""),
-                         "ok": False, "erro": f"Erro ao abrir browser: {e2}"} for p in processos]
+        # Conecta ao Chrome que JÁ ESTÁ ABERTO via CDP (Chrome DevTools Protocol)
+        # O Chrome precisa ter sido iniciado com --remote-debugging-port=9222
+        # Caso contrário, abre uma nova instância com o perfil do usuário
+        browser = None
+        context = None
+        page = None
 
-        page = await context.new_page()
+        # Tenta conectar ao Chrome aberto via CDP
+        try:
+            browser = await pw.chromium.connect_over_cdp("http://127.0.0.1:9222")
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = await context.new_page()
+            if on_progress:
+                on_progress({"etapa": "conectado", "msg": "Conectado ao Chrome aberto!"})
+        except Exception:
+            # CDP não disponível — abre Chrome com perfil do usuário
+            try:
+                context = await pw.chromium.launch_persistent_context(
+                    user_data_dir=CHROME_PROFILE,
+                    channel="chrome",
+                    headless=False,
+                    accept_downloads=True,
+                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                )
+                page = context.pages[0] if context.pages else await context.new_page()
+            except Exception as e:
+                try:
+                    browser = await pw.chromium.launch(channel="chrome", headless=False)
+                    context = await browser.new_context(accept_downloads=True)
+                    page = await context.new_page()
+                except Exception as e2:
+                    return [{"numero_processo": p.get("numero_processo", ""),
+                             "ok": False, "erro": f"Feche o Chrome e tente novamente, ou inicie com: chrome --remote-debugging-port=9222"} for p in processos]
 
         # Agrupar por grau para não ficar alternando
         por_grau = {}
