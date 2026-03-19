@@ -142,11 +142,11 @@ def montar_corpo(info: dict, template_corpo: str = None) -> str:
     data_str = f"Teresina, {hoje.day} de {meses[hoje.month-1]} de {hoje.year}"
     tipo_str = (tipo or "documento").lower()
     return (
-        f"{data_str}\n\n"
         f"Prezado(a) Senhor(a),\n\n"
         f"Encaminhamos em anexo o {tipo_str} judicial referente ao "
         f"processo {num}, expedido pela Seção Judiciária do Piauí - SJPI.\n\n"
         f"Atenciosamente,\n\n"
+        f"{data_str}\n\n"
         f"Aglanio Frota Moura Carvalho\n"
         f"Oficial de Justiça Avaliador Federal     PI100327\n"
         f"Seção Judiciária do Piauí - TRF 1ª Região\n"

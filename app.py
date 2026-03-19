@@ -99,13 +99,13 @@ def _corpo_padrao_smtp(numero_processo: Optional[str] = None) -> str:
              "julho","agosto","setembro","outubro","novembro","dezembro"]
     hoje = date.today()
     data_str = f"Teresina, {hoje.day} de {meses[hoje.month-1]} de {hoje.year}"
-    return f"""{data_str}
-
-Prezado(a) Senhor(a),
+    return f"""Prezado(a) Senhor(a),
 
 Encaminhamos em anexo o mandado judicial referente ao processo {proc}, expedido pela Seção Judiciária do Piauí - SJPI.
 
 Atenciosamente,
+
+{data_str}
 
 Aglanio Frota Moura Carvalho
 Oficial de Justiça Avaliador Federal     PI100327
