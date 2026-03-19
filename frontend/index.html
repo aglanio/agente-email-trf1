@@ -1142,22 +1142,33 @@ function extrairNumerosDoTexto(texto) {
 }
 
 function _extrairDestino(ctx, numero) {
-  // Prioriza texto APÓS o número do processo
   const posNum = ctx.indexOf(numero);
   const depois = posNum >= 0 ? ctx.slice(posNum + numero.length) : '';
+  const sem = ctx.replace(numero, ' ').trim();
 
-  // Padrões após o número: "- INSS Teresina", "- Destinatário: Banco do Brasil"
+  // 1) Texto entre colchetes [Ceab/DJ da Superintendência...]
+  const colchetes = sem.match(/\[([^\]]{3,80})\]/);
+  if (colchetes) return _limpar(colchetes[1]);
+
+  // 2) Texto entre parênteses com nome de órgão (460) é tipo, ignora números
+  const parens = sem.match(/\(([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][^)]{3,60})\)/);
+  if (parens && !/^\d+$/.test(parens[1].trim())) {
+    const inner = parens[1].trim();
+    if (inner.length > 5 && !/^\d+$/.test(inner)) return _limpar(inner);
+  }
+
+  // 3) Padrões após o número: "- INSS", "- Destinatário: Banco do Brasil"
   const padsDepois = [
     /^\s*[-–:]\s*(?:Intimad[ao]|Destinat[aá]ri[ao]|R[eé]u|Exequente|Executad[ao])\s*:?\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][^,;\n]{3,55})/i,
-    /^\s*[-–(]\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇa-záéíóúàâãêîôõüç\s]{4,50}(?:LTDA|S\.A\.|ME|EPP|EIRELI|INSS|CAIXA|BANCO|MINISTÉRIO|SECRETARIA|PREFEITURA|FGTS|ANATEL))\b/i,
+    /^\s*[-–]\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][^,;\n\[\]]{3,55})/i,
+    /^\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇa-záéíóúàâãêîôõüç\s]{4,50}(?:LTDA|S\.A\.|ME|EPP|EIRELI|INSS|CAIXA|BANCO|MINISTÉRIO|SECRETARIA|PREFEITURA|FGTS|ANATEL|DETRAN|IBGE|DNIT|INCRA|FUNASA|IBAMA|IPHAN|CONAB|CEF|OAB))\b/i,
   ];
   for (const pad of padsDepois) {
     const r = depois.match(pad);
     if (r && r[1]) return _limpar(r[1]);
   }
 
-  // Fallback: contexto completo com labels explícitas (sem "Para" — muito genérico em PT)
-  const sem = ctx.replace(numero, ' ').trim();
+  // 4) Fallback: labels explícitas no contexto
   const pads = [
     /(?:Intimad[ao]|Destinat[aá]ri[ao]|R[eé]u|Exequente|Executad[ao])\s*:?\s*([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][^\n,;:]{3,55})/i,
     /([A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÎÔÕÜÇa-záéíóúàâãêîôõüç\s]{4,40}(?:LTDA|S\.A\.|INSS|CAIXA|BANCO|MINISTÉRIO|SECRETARIA|PREFEITURA))\b/,
