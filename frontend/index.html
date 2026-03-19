@@ -709,7 +709,6 @@ function mkBadge(txt, cls) {
 }
 
 function abrirNoOutlook(email, assunto, corpo) {
-  // Abre compose window no Outlook Web (New Outlook) ou app mailto
   const url = 'https://outlook.office.com/mail/deeplink/compose?to=' +
     encodeURIComponent(email) +
     '&subject=' + encodeURIComponent(assunto) +
@@ -726,18 +725,18 @@ async function enviarEmailLote() {
   try {
     for (const id of ids) {
       const d = await fetchJSON(API + '/email/preview/' + id);
-      if (d.ok && d.preview) {
+      if (d.ok && d.preview && d.preview.to) {
         abrirNoOutlook(d.preview.to, d.preview.subject, d.preview.body);
         abertos++;
-        await new Promise(ok => setTimeout(ok, 800));
+        await new Promise(ok => setTimeout(ok, 600));
       }
     }
     if (abertos) {
       showAlert('alertProc', '\u2709\ufe0f ' + abertos + ' e-mail(s) aberto(s) no Outlook!', 'ok');
+      loadProcs(); loadStatus();
     } else {
       showAlert('alertProc', '\u26a0 Nenhum e-mail dispon\u00edvel. Preencha os e-mails primeiro.', 'warn');
     }
-    loadProcs(); loadStatus();
   } catch(e) { showAlert('alertProc', 'Erro de conex\u00e3o.', 'err'); }
   btn.disabled = false; btn.textContent = '\u2709\ufe0f Abrir no Outlook';
 }
@@ -1275,8 +1274,28 @@ function renderTextExtraidos() {
 
     const tdEmail = document.createElement('td');
     tdEmail.id = 'td-email-' + idx;
-    tdEmail.style.cssText = 'font-size:12px;color:var(--text2)';
-    tdEmail.textContent = '\u2014';
+    tdEmail.style.cssText = 'font-size:12px';
+    if (item.email) {
+      // Já tem email encontrado — mostra
+      const eDiv = document.createElement('div');
+      eDiv.style.cssText = 'color:var(--green);font-weight:600;font-size:12px';
+      eDiv.textContent = item.email;
+      tdEmail.appendChild(eDiv);
+      if (item.emailFonte) {
+        const fDiv = document.createElement('div');
+        fDiv.style.cssText = 'color:var(--text2);font-size:10px';
+        fDiv.textContent = '\u2713 ' + item.emailFonte;
+        tdEmail.appendChild(fDiv);
+      }
+      const inp2 = document.createElement('input');
+      inp2.type = 'text'; inp2.value = item.email;
+      inp2.style.cssText = 'font-size:11px;margin-top:4px;width:100%';
+      inp2.addEventListener('change', e => { textExtraidos[idx].email = e.target.value.trim(); });
+      tdEmail.appendChild(inp2);
+    } else {
+      tdEmail.style.color = 'var(--text2)';
+      tdEmail.textContent = '\u2014';
+    }
     tr.appendChild(tdEmail);
 
     // Coluna Arquivos PDF
@@ -1536,10 +1555,10 @@ async function criarEAbrirRascunhos() {
     for (const pid of idsComEmail) {
       try {
         const d = await fetchJSON(API + '/email/preview/' + pid);
-        if (d.ok && d.preview) {
+        if (d.ok && d.preview && d.preview.to) {
           abrirNoOutlook(d.preview.to, d.preview.subject, d.preview.body);
           abertos++;
-          await new Promise(ok => setTimeout(ok, 800));
+          await new Promise(ok => setTimeout(ok, 600));
         }
       } catch(e) {}
     }
@@ -1667,15 +1686,15 @@ function renderEmpty(tbId, cols, msg) {
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
-function showAlert(elId, msg, type) {
+function showAlert(elId, msg, type, keepOpen) {
   const el = document.getElementById(elId);
   if (!el) return;
   clearEl(el);
   const d = document.createElement('div');
   d.className = 'alert a-' + type;
-  d.textContent = msg;
+  d.innerHTML = msg;
   el.appendChild(d);
-  setTimeout(() => clearEl(el), 5000);
+  if (!keepOpen) setTimeout(() => clearEl(el), 5000);
 }
 
 // ════════════════════════════════════════════════════════════
