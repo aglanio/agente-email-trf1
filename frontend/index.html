@@ -1185,8 +1185,26 @@ async function extrairDoTexto() {
     clearEl(document.getElementById('textoRes'));
     return;
   }
-  countEl.textContent = textExtraidos.length + ' n\u00famero(s) encontrado(s)';
+  countEl.textContent = textExtraidos.length + ' n\u00famero(s) encontrado(s) — buscando e-mails...';
   renderTextExtraidos();
+
+  // Auto-busca emails para cada destinatário extraído do contexto
+  for (let idx = 0; idx < textExtraidos.length; idx++) {
+    const item = textExtraidos[idx];
+    if (!item.destino) continue;
+    try {
+      const d = await fetchJSON(API + '/contatos/buscar?nome=' + encodeURIComponent(item.destino));
+      if (d.email) {
+        textExtraidos[idx].email = d.email;
+        textExtraidos[idx].emailFonte = d.fonte || '';
+        textExtraidos[idx].emailConf = d.confianca || '';
+      }
+    } catch(e) {}
+  }
+  // Re-render com emails preenchidos
+  renderTextExtraidos();
+  const comEmail = textExtraidos.filter(i => i.email).length;
+  countEl.textContent = textExtraidos.length + ' n\u00famero(s) encontrado(s)' + (comEmail ? ' \u2014 ' + comEmail + ' e-mail(s) encontrado(s) \u2705' : '');
 }
 
 function renderTextExtraidos() {
