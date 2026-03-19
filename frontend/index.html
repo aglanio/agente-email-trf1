@@ -708,6 +708,11 @@ function mkBadge(txt, cls) {
   return s;
 }
 
+function baixarEml(id) {
+  // Abre .eml direto — o Windows associa .eml ao Outlook e abre automaticamente
+  window.open(API + '/rascunhos/eml/' + id, '_blank');
+}
+
 async function enviarEmailLote() {
   const ids = [...document.querySelectorAll('.ck-proc:checked')].map(c => parseInt(c.value));
   if (!ids.length) { showAlert('alertProc', 'Selecione ao menos um processo.', 'warn'); return; }
@@ -718,20 +723,14 @@ async function enviarEmailLote() {
     if (d.ok) {
       let baixados = 0;
       for (const r of d.resultados) {
-        if (r.ok && r.filename) {
-          // Baixa cada .eml
-          const a = document.createElement('a');
-          a.href = API + '/rascunhos/eml/' + r.id;
-          a.download = r.filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+        if (r.ok) {
+          baixarEml(r.id);
           baixados++;
-          await new Promise(ok => setTimeout(ok, 500)); // delay entre downloads
+          await new Promise(ok => setTimeout(ok, 800));
         }
       }
       const erros = d.resultados.filter(r => !r.ok);
-      showAlert('alertProc', '\u2709\ufe0f ' + baixados + ' rascunho(s) baixado(s). Abra no Outlook para revisar e enviar.' + (erros.length ? ' (' + erros.length + ' erro(s))' : ''), 'ok');
+      showAlert('alertProc', '\u2709\ufe0f ' + baixados + ' rascunho(s) aberto(s) no Outlook!' + (erros.length ? ' (' + erros.length + ' erro(s))' : ''), 'ok');
       loadProcs(); loadStatus();
     } else {
       showAlert('alertProc', d.erro || 'Erro ao gerar rascunhos.', 'err');
@@ -741,17 +740,11 @@ async function enviarEmailLote() {
 }
 
 async function enviarEmailUnico(id) {
-  // Baixa .eml para abrir no Outlook
   try {
-    const a = document.createElement('a');
-    a.href = API + '/rascunhos/eml/' + id;
-    a.download = 'rascunho_' + id + '.eml';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    showAlert('alertProc', '\u2709\ufe0f Rascunho baixado! Abra o arquivo .eml no Outlook para revisar e enviar.', 'ok');
+    baixarEml(id);
+    showAlert('alertProc', '\u2709\ufe0f Rascunho aberto no Outlook!', 'ok');
     loadProcs(); loadStatus();
-  } catch(e) { showAlert('alertProc', 'Erro ao baixar rascunho.', 'err'); }
+  } catch(e) { showAlert('alertProc', 'Erro ao abrir rascunho.', 'err'); }
 }
 
 async function previewLote() {
@@ -1457,11 +1450,21 @@ async function criarEAbrirRascunhos() {
   const btn = document.getElementById('btnRascTexto');
   if (btn) { btn.disabled = true; btn.textContent = '\u23f3 Enviando arquivos...'; }
 
-  // Atualizar e-mail no banco para processos que têm email no frontend mas não no DB
+  // Atualizar e-mail no banco — lê de todos os inputs possíveis
   for (const item of comId) {
-    // Ler também do input de e-mail caso o usuário tenha digitado manualmente
-    const emailInps = document.querySelectorAll('#td-email-' + textExtraidos.indexOf(item) + ' input');
+    const idx = textExtraidos.indexOf(item);
+    // Ler do input de e-mail
+    const emailInps = document.querySelectorAll('#td-email-' + idx + ' input');
     if (emailInps.length) item.email = emailInps[emailInps.length - 1].value.trim() || item.email;
+    // Ler do input de destinatário — se parece e-mail, usa como e-mail também
+    const destInp = document.querySelector('#tr-texto-' + idx + ' input');
+    if (destInp) {
+      const destVal = destInp.value.trim();
+      if (destVal && destVal.includes('@') && !item.email) {
+        item.email = destVal;
+        item.destino = destVal;
+      }
+    }
     if (item.email) {
       try {
         await patchJSON(API + '/processos/' + item.id, {
@@ -1496,18 +1499,13 @@ async function criarEAbrirRascunhos() {
     if (d.ok) {
       let baixados = 0;
       for (const r of d.resultados) {
-        if (r.ok && r.filename) {
-          const a = document.createElement('a');
-          a.href = API + '/rascunhos/eml/' + r.id;
-          a.download = r.filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+        if (r.ok) {
+          baixarEml(r.id);
           baixados++;
-          await new Promise(ok => setTimeout(ok, 500));
+          await new Promise(ok => setTimeout(ok, 800));
         }
       }
-      showAlertTexto('\u2709\ufe0f ' + baixados + ' rascunho(s) baixado(s). Abra no Outlook para revisar e enviar.', 'ok');
+      showAlertTexto('\u2709\ufe0f ' + baixados + ' rascunho(s) aberto(s) no Outlook!', 'ok');
       loadProcs(); loadStatus();
     } else {
       showAlertTexto(d.erro || 'Erro ao gerar rascunhos.', 'err');
