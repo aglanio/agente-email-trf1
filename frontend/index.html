@@ -213,7 +213,7 @@
 
   <!-- ── Colar Texto ─────────────────────────────────────────────── -->
   <div id="page-texto" class="page">
-    <div class="card" style="max-width:720px">
+    <div class="card">
       <div class="card-title">&#128203; Extrair N&#250;meros de Processo do Texto</div>
       <p class="text2" style="margin-bottom:14px">Cole qualquer texto (lista PJe, e-mail, relat&#243;rio). O sistema extrai todos os n&#250;meros CNJ automaticamente, mesmo com texto junto.</p>
       <textarea id="textoInput" placeholder="Cole aqui o texto com os n&#250;meros de processo...&#10;&#10;Exemplo:&#10;  Processo 1234567-89.2024.4.01.3400 - INSS&#10;  Processo 9876543-21.2023.4.01.0000 - Caixa Econ&#244;mica" style="height:130px;resize:vertical;font-family:monospace;font-size:13px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:7px;width:100%"></textarea>
@@ -1274,28 +1274,24 @@ function renderTextExtraidos() {
 
     const tdEmail = document.createElement('td');
     tdEmail.id = 'td-email-' + idx;
-    tdEmail.style.cssText = 'font-size:12px';
-    if (item.email) {
-      // Já tem email encontrado — mostra
-      const eDiv = document.createElement('div');
-      eDiv.style.cssText = 'color:var(--green);font-weight:600;font-size:12px';
-      eDiv.textContent = item.email;
-      tdEmail.appendChild(eDiv);
-      if (item.emailFonte) {
-        const fDiv = document.createElement('div');
-        fDiv.style.cssText = 'color:var(--text2);font-size:10px';
-        fDiv.textContent = '\u2713 ' + item.emailFonte;
-        tdEmail.appendChild(fDiv);
-      }
-      const inp2 = document.createElement('input');
-      inp2.type = 'text'; inp2.value = item.email;
-      inp2.style.cssText = 'font-size:11px;margin-top:4px;width:100%';
-      inp2.addEventListener('change', e => { textExtraidos[idx].email = e.target.value.trim(); });
-      tdEmail.appendChild(inp2);
-    } else {
-      tdEmail.style.color = 'var(--text2)';
-      tdEmail.textContent = '\u2014';
+    tdEmail.style.cssText = 'font-size:12px;min-width:220px';
+    if (item.email && item.emailFonte) {
+      const fDiv = document.createElement('div');
+      fDiv.style.cssText = 'color:var(--text2);font-size:10px;margin-bottom:2px';
+      fDiv.textContent = '\u2713 ' + item.emailFonte;
+      tdEmail.appendChild(fDiv);
     }
+    const inp2 = document.createElement('input');
+    inp2.type = 'text';
+    inp2.value = item.email || '';
+    inp2.placeholder = 'Digite o e-mail...';
+    inp2.style.cssText = 'font-size:12px;width:100%;' + (item.email ? 'color:var(--green);font-weight:600;border-color:var(--green)' : '');
+    inp2.addEventListener('change', e => {
+      textExtraidos[idx].email = e.target.value.trim();
+      inp2.style.color = e.target.value.trim() ? 'var(--green)' : '';
+      inp2.style.fontWeight = e.target.value.trim() ? '600' : '';
+    });
+    tdEmail.appendChild(inp2);
     tr.appendChild(tdEmail);
 
     // Coluna Arquivos PDF
