@@ -94,6 +94,13 @@
   input[type=checkbox] { width: auto; cursor: pointer; accent-color: var(--accent2); }
   .text2 { color: var(--text2); font-size: 13px; }
   .flex { display: flex; align-items: center; gap: 8px; }
+  .ac-wrap { position: relative; }
+  .ac-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; background: var(--bg2); border: 1px solid var(--accent2); border-radius: 7px; max-height: 200px; overflow-y: auto; display: none; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .ac-list.open { display: block; }
+  .ac-opt { padding: 8px 12px; cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 8px; }
+  .ac-opt:hover, .ac-opt.sel { background: rgba(79,70,229,.15); }
+  .ac-opt .ac-nome { color: var(--text); font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ac-opt .ac-email { color: var(--green); font-size: 11px; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -1263,18 +1270,34 @@ function renderTextExtraidos() {
     tr.appendChild(tdNum);
 
     const tdDest = document.createElement('td');
+    tdDest.style.cssText = 'min-width:180px';
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.placeholder = 'Nome do \u00f3rg\u00e3o/destinat\u00e1rio...';
     inp.value = item.destino || '';
-    inp.style.cssText = 'width:100%;min-width:160px';
+    inp.style.cssText = 'width:100%';
     inp.addEventListener('change', e => { textExtraidos[idx].destino = e.target.value.trim(); });
     tdDest.appendChild(inp);
+    // Autocomplete no campo destinatário — ao selecionar, preenche email também
+    criarAutocomplete(inp, c => {
+      inp.value = c.nome || c.orgao || '';
+      textExtraidos[idx].destino = inp.value;
+      if (c.email) {
+        textExtraidos[idx].email = c.email;
+        const emailInp = document.querySelector('#td-email-' + idx + ' input');
+        if (emailInp) {
+          emailInp.value = c.email;
+          emailInp.style.color = 'var(--green)';
+          emailInp.style.fontWeight = '600';
+          emailInp.style.borderColor = 'var(--green)';
+        }
+      }
+    });
     tr.appendChild(tdDest);
 
     const tdEmail = document.createElement('td');
     tdEmail.id = 'td-email-' + idx;
-    tdEmail.style.cssText = 'font-size:12px;min-width:220px';
+    tdEmail.style.cssText = 'font-size:12px;min-width:240px';
     if (item.email && item.emailFonte) {
       const fDiv = document.createElement('div');
       fDiv.style.cssText = 'color:var(--text2);font-size:10px;margin-bottom:2px';
@@ -1284,7 +1307,7 @@ function renderTextExtraidos() {
     const inp2 = document.createElement('input');
     inp2.type = 'text';
     inp2.value = item.email || '';
-    inp2.placeholder = 'Digite o e-mail...';
+    inp2.placeholder = 'Digite o e-mail ou nome...';
     inp2.style.cssText = 'font-size:12px;width:100%;' + (item.email ? 'color:var(--green);font-weight:600;border-color:var(--green)' : '');
     inp2.addEventListener('change', e => {
       textExtraidos[idx].email = e.target.value.trim();
@@ -1292,6 +1315,20 @@ function renderTextExtraidos() {
       inp2.style.fontWeight = e.target.value.trim() ? '600' : '';
     });
     tdEmail.appendChild(inp2);
+    // Autocomplete no campo email também
+    criarAutocomplete(inp2, c => {
+      inp2.value = c.email || '';
+      inp2.style.color = 'var(--green)';
+      inp2.style.fontWeight = '600';
+      inp2.style.borderColor = 'var(--green)';
+      textExtraidos[idx].email = c.email;
+      // Atualiza destinatário se vazio
+      if (c.nome && !textExtraidos[idx].destino) {
+        textExtraidos[idx].destino = c.nome;
+        const destInp = document.querySelector('#tr-texto-' + idx + ' input');
+        if (destInp) destInp.value = c.nome;
+      }
+    });
     tr.appendChild(tdEmail);
 
     // Coluna Arquivos PDF
@@ -1691,6 +1728,85 @@ function showAlert(elId, msg, type, keepOpen) {
   d.innerHTML = msg;
   el.appendChild(d);
   if (!keepOpen) setTimeout(() => clearEl(el), 5000);
+}
+
+// ── Autocomplete de contatos ────────────────────────────────────────────────
+let _acTimer = null;
+let _acCache = {};
+
+function criarAutocomplete(input, onSelect) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ac-wrap';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+
+  const lista = document.createElement('div');
+  lista.className = 'ac-list';
+  wrap.appendChild(lista);
+
+  let selIdx = -1;
+
+  input.addEventListener('input', () => {
+    clearTimeout(_acTimer);
+    const q = input.value.trim();
+    if (q.length < 2) { lista.classList.remove('open'); return; }
+    _acTimer = setTimeout(async () => {
+      try {
+        const cacheKey = q.toLowerCase();
+        let results;
+        if (_acCache[cacheKey]) {
+          results = _acCache[cacheKey];
+        } else {
+          const d = await fetchJSON(API + '/contatos?q=' + encodeURIComponent(q) + '&limit=8');
+          results = d.contatos || [];
+          _acCache[cacheKey] = results;
+        }
+        renderAcList(lista, results, input, onSelect);
+      } catch(e) {}
+    }, 250);
+  });
+
+  input.addEventListener('keydown', e => {
+    const opts = lista.querySelectorAll('.ac-opt');
+    if (!opts.length || !lista.classList.contains('open')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); selIdx = Math.min(selIdx + 1, opts.length - 1); updateAcSel(opts, selIdx); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); updateAcSel(opts, selIdx); }
+    else if (e.key === 'Enter' && selIdx >= 0) { e.preventDefault(); opts[selIdx].click(); }
+    else if (e.key === 'Escape') { lista.classList.remove('open'); selIdx = -1; }
+  });
+
+  input.addEventListener('blur', () => { setTimeout(() => { lista.classList.remove('open'); selIdx = -1; }, 200); });
+  input.addEventListener('focus', () => { if (lista.children.length && input.value.trim().length >= 2) lista.classList.add('open'); });
+
+  return wrap;
+}
+
+function renderAcList(lista, contatos, input, onSelect) {
+  while (lista.firstChild) lista.removeChild(lista.firstChild);
+  if (!contatos.length) { lista.classList.remove('open'); return; }
+  contatos.forEach(c => {
+    const opt = document.createElement('div');
+    opt.className = 'ac-opt';
+    const nome = document.createElement('span');
+    nome.className = 'ac-nome';
+    nome.textContent = c.nome || c.orgao || '';
+    const email = document.createElement('span');
+    email.className = 'ac-email';
+    email.textContent = c.email || '';
+    opt.appendChild(nome);
+    opt.appendChild(email);
+    opt.addEventListener('mousedown', e => {
+      e.preventDefault();
+      onSelect(c);
+      lista.classList.remove('open');
+    });
+    lista.appendChild(opt);
+  });
+  lista.classList.add('open');
+}
+
+function updateAcSel(opts, idx) {
+  opts.forEach((o, i) => o.classList.toggle('sel', i === idx));
 }
 
 // ════════════════════════════════════════════════════════════
