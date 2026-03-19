@@ -156,6 +156,7 @@
               <th>Destinat&#225;rio</th>
               <th>E-mail</th>
               <th>Confian&#231;a</th>
+              <th>Grau</th>
               <th>Status</th>
               <th>A&#231;&#245;es</th>
             </tr>
@@ -660,6 +661,40 @@ function renderProcs(list) {
     tdConf.appendChild(mkBadge(confLabel(p.email_encontrado_em), confCls(p.email_encontrado_em)));
     tr.appendChild(tdConf);
 
+    // grau (1G / 2G)
+    const tdGrau = document.createElement('td');
+    tdGrau.style.cssText = 'white-space:nowrap';
+    const grauAtual = p.grau || 1;
+    const btn1g = document.createElement('button');
+    btn1g.className = 'btn btn-sm';
+    btn1g.style.cssText = grauAtual === 1 ? 'background:var(--accent);color:#fff;font-size:11px;padding:2px 8px' : 'background:var(--bg3);color:var(--text2);font-size:11px;padding:2px 8px';
+    btn1g.textContent = '1G';
+    btn1g.addEventListener('click', async () => {
+      await patchJSON(API + '/processos/' + p.id, {grau: 1});
+      loadProcs();
+    });
+    const btn2g = document.createElement('button');
+    btn2g.className = 'btn btn-sm';
+    btn2g.style.cssText = grauAtual === 2 ? 'background:var(--accent2);color:#fff;font-size:11px;padding:2px 8px;margin-left:2px' : 'background:var(--bg3);color:var(--text2);font-size:11px;padding:2px 8px;margin-left:2px';
+    btn2g.textContent = '2G';
+    btn2g.addEventListener('click', async () => {
+      await patchJSON(API + '/processos/' + p.id, {grau: 2});
+      loadProcs();
+    });
+    const pjeBtn = document.createElement('button');
+    pjeBtn.className = 'btn btn-sm';
+    pjeBtn.style.cssText = 'background:rgba(59,130,246,.2);color:#60a5fa;font-size:10px;padding:2px 6px;margin-left:4px';
+    pjeBtn.title = 'Abrir no PJe';
+    pjeBtn.textContent = 'PJe';
+    pjeBtn.addEventListener('click', () => {
+      const base = grauAtual === 2 ? 'https://pje2g.trf1.jus.br' : 'https://pje1g.trf1.jus.br';
+      window.open(base + '/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam', '_blank');
+    });
+    tdGrau.appendChild(btn1g);
+    tdGrau.appendChild(btn2g);
+    tdGrau.appendChild(pjeBtn);
+    tr.appendChild(tdGrau);
+
     // status
     const tdSt = document.createElement('td');
     tdSt.appendChild(stBadge(p.status));
@@ -675,14 +710,15 @@ function renderProcs(list) {
     if (p.email_destinatario && p.status !== 'enviado') {
       const envBtn = document.createElement('button');
       envBtn.className = 'btn btn-sm'; envBtn.style.cssText = 'background:rgba(34,197,94,.2);color:var(--green);margin-left:4px';
-      envBtn.textContent = '📧 Enviar';
+      envBtn.textContent = '\u2709\ufe0f';
+      envBtn.title = 'Abrir no Outlook';
       envBtn.addEventListener('click', () => enviarEmailUnico(p.id));
       tdAc.appendChild(envBtn);
     }
     if (p.status === 'enviado') {
       const okBadge = document.createElement('span');
       okBadge.style.cssText = 'margin-left:4px;font-size:11px;color:var(--green)';
-      okBadge.textContent = '✅ Enviado';
+      okBadge.textContent = '\u2705';
       tdAc.appendChild(okBadge);
     }
     tr.appendChild(tdAc);
@@ -1142,7 +1178,7 @@ function extrairNumerosDoTexto(texto) {
     const fim = Math.min(normalizado.length, m.index + m[0].length + 100);
     const ctx = normalizado.slice(ini, fim).replace(/[\n\r]+/g, ' ').trim();
     const dest = _extrairDestino(ctx, m[0]);
-    lista.push({ numero: m[0], contexto: ctx, destino: dest, email: '', emailFonte: '', emailConf: '', id: null });
+    lista.push({ numero: m[0], contexto: ctx, destino: dest, email: '', emailFonte: '', emailConf: '', id: null, grau: 1 });
   });
   return lista;
 }
@@ -1234,7 +1270,7 @@ function renderTextExtraidos() {
   const tbl = document.createElement('table');
   const thead = document.createElement('thead');
   const hrw = document.createElement('tr');
-  ['#', 'N\u00famero do Processo', 'Destinat\u00e1rio (edit\u00e1vel)', 'E-mail', 'Arquivos PDF'].forEach((h, i) => {
+  ['#', 'N\u00famero do Processo', 'Destinat\u00e1rio (edit\u00e1vel)', 'E-mail', 'Grau', 'Arquivos PDF'].forEach((h, i) => {
     const th = document.createElement('th');
     th.textContent = h;
     if (i === 0) th.style.width = '30px';
@@ -1330,6 +1366,24 @@ function renderTextExtraidos() {
       }
     });
     tr.appendChild(tdEmail);
+
+    // Coluna Grau (1G / 2G)
+    const tdGrau = document.createElement('td');
+    tdGrau.style.cssText = 'white-space:nowrap;text-align:center';
+    const grauVal = item.grau || 1;
+    const g1 = document.createElement('button');
+    g1.className = 'btn btn-sm';
+    g1.style.cssText = grauVal === 1 ? 'background:var(--accent);color:#fff;font-size:11px;padding:2px 8px' : 'background:var(--bg3);color:var(--text2);font-size:11px;padding:2px 8px';
+    g1.textContent = '1G';
+    g1.addEventListener('click', () => { textExtraidos[idx].grau = 1; g1.style.background = 'var(--accent)'; g1.style.color = '#fff'; g2.style.background = 'var(--bg3)'; g2.style.color = 'var(--text2)'; });
+    const g2 = document.createElement('button');
+    g2.className = 'btn btn-sm';
+    g2.style.cssText = grauVal === 2 ? 'background:var(--accent2);color:#fff;font-size:11px;padding:2px 8px;margin-left:2px' : 'background:var(--bg3);color:var(--text2);font-size:11px;padding:2px 8px;margin-left:2px';
+    g2.textContent = '2G';
+    g2.addEventListener('click', () => { textExtraidos[idx].grau = 2; g2.style.background = 'var(--accent2)'; g2.style.color = '#fff'; g1.style.background = 'var(--bg3)'; g1.style.color = 'var(--text2)'; });
+    tdGrau.appendChild(g1);
+    tdGrau.appendChild(g2);
+    tr.appendChild(tdGrau);
 
     // Coluna Arquivos PDF
     const tdArq = document.createElement('td');

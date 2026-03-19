@@ -211,6 +211,7 @@ class ProcessoUpdate(BaseModel):
     email_destinatario: Optional[str] = None
     assunto_email: Optional[str] = None
     status: Optional[str] = None
+    grau: Optional[int] = None
 
 class EmailManual(BaseModel):
     nome_orgao: str
@@ -400,6 +401,8 @@ def atualizar_processo(processo_id: int, data: ProcessoUpdate):
         updates["assunto_email"] = data.assunto_email
     if data.status is not None:
         updates["status"] = data.status
+    if data.grau is not None:
+        updates["grau"] = data.grau
 
     if updates:
         sets = ", ".join(f"{k} = ?" for k in updates)

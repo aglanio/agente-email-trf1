@@ -97,6 +97,13 @@ def init_db():
     except Exception:
         pass  # já existe
 
+    # Adiciona coluna grau (1=1ºgrau, 2=2ºgrau) se ainda não existir
+    try:
+        c.execute("ALTER TABLE processos ADD COLUMN grau INTEGER DEFAULT 1")
+        conn.commit()
+    except Exception:
+        pass  # já existe
+
     # ── Escritório Virtual de IA ──────────────────────────────────────────────
     c.execute("""
     CREATE TABLE IF NOT EXISTS escritorio_agentes (
