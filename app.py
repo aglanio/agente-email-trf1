@@ -937,22 +937,25 @@ def pje_baixar(data: PjeRequest, background_tasks: BackgroundTasks):
     """
     Inicia o download dos mandados do PJe para os processos informados.
     Abre o Chrome do usuário (com sessão ativa) e baixa os PDFs.
+    Usa o campo 'grau' de cada processo para saber se é PJe 1G ou 2G.
     """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    numeros = []
-    processo_map = {}  # numero → id
+    processos_data = []
     for pid in data.processo_ids:
-        cur.execute("SELECT id, numero_processo FROM processos WHERE id = ?", (pid,))
+        cur.execute("SELECT id, numero_processo, grau FROM processos WHERE id = ?", (pid,))
         row = cur.fetchone()
         if row:
-            numeros.append(row["numero_processo"])
-            processo_map[row["numero_processo"]] = row["id"]
+            processos_data.append({
+                "id": row["id"],
+                "numero_processo": row["numero_processo"],
+                "grau": row["grau"] or 1,
+            })
     conn.close()
 
-    if not numeros:
+    if not processos_data:
         return {"ok": False, "erro": "Nenhum processo encontrado"}
 
     try:
@@ -960,22 +963,27 @@ def pje_baixar(data: PjeRequest, background_tasks: BackgroundTasks):
     except ImportError as e:
         return {"ok": False, "erro": str(e)}
 
-    resultados = baixar_documentos_pje_sync(numeros)
+    resultados = baixar_documentos_pje_sync(processos_data)
 
     # Salvar caminhos dos arquivos baixados no banco
     conn2 = sqlite3.connect(DB_PATH)
     for r in resultados:
-        if r["ok"] and r.get("arquivo"):
-            pid = processo_map.get(r["numero"])
+        if r.get("ok"):
+            pid = r.get("id")
             if pid:
-                conn2.execute(
-                    "UPDATE processos SET arquivo_mandado = ? WHERE id = ?",
-                    (r["arquivo"], pid)
-                )
+                updates = {}
+                if r.get("mandado"):
+                    updates["arquivo_mandado"] = r["mandado"]
+                if r.get("anexo"):
+                    updates["arquivo_anexo"] = r["anexo"]
+                if updates:
+                    sets = ", ".join(f"{k} = ?" for k in updates)
+                    vals = list(updates.values()) + [pid]
+                    conn2.execute(f"UPDATE processos SET {sets} WHERE id = ?", vals)
     conn2.commit()
     conn2.close()
 
-    sucessos = sum(1 for r in resultados if r["ok"])
+    sucessos = sum(1 for r in resultados if r.get("ok"))
     return {
         "ok": True,
         "total": len(resultados),
