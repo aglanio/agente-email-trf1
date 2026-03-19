@@ -708,41 +708,49 @@ function mkBadge(txt, cls) {
   return s;
 }
 
-function baixarEml(id) {
-  // Abre .eml direto — o Windows associa .eml ao Outlook e abre automaticamente
-  window.open(API + '/rascunhos/eml/' + id, '_blank');
+function abrirNoOutlook(email, assunto, corpo) {
+  // Abre compose window no Outlook Web (New Outlook) ou app mailto
+  const url = 'https://outlook.office.com/mail/deeplink/compose?to=' +
+    encodeURIComponent(email) +
+    '&subject=' + encodeURIComponent(assunto) +
+    '&body=' + encodeURIComponent(corpo);
+  window.open(url, '_blank');
 }
 
 async function enviarEmailLote() {
   const ids = [...document.querySelectorAll('.ck-proc:checked')].map(c => parseInt(c.value));
   if (!ids.length) { showAlert('alertProc', 'Selecione ao menos um processo.', 'warn'); return; }
   const btn = document.getElementById('btnRascLote');
-  btn.disabled = true; btn.textContent = '\u23f3 Gerando rascunhos...';
+  btn.disabled = true; btn.textContent = '\u23f3 Abrindo no Outlook...';
+  let abertos = 0;
   try {
-    const d = await postJSON(API + '/rascunhos/eml-lote', {processo_ids: ids});
-    if (d.ok) {
-      let baixados = 0;
-      for (const r of d.resultados) {
-        if (r.ok) {
-          baixarEml(r.id);
-          baixados++;
-          await new Promise(ok => setTimeout(ok, 800));
-        }
+    for (const id of ids) {
+      const d = await fetchJSON(API + '/email/preview/' + id);
+      if (d.ok && d.preview) {
+        abrirNoOutlook(d.preview.to, d.preview.subject, d.preview.body);
+        abertos++;
+        await new Promise(ok => setTimeout(ok, 800));
       }
-      const erros = d.resultados.filter(r => !r.ok);
-      showAlert('alertProc', '\u2709\ufe0f ' + baixados + ' rascunho(s) aberto(s) no Outlook!' + (erros.length ? ' (' + erros.length + ' erro(s))' : ''), 'ok');
-      loadProcs(); loadStatus();
-    } else {
-      showAlert('alertProc', d.erro || 'Erro ao gerar rascunhos.', 'err');
     }
+    if (abertos) {
+      showAlert('alertProc', '\u2709\ufe0f ' + abertos + ' e-mail(s) aberto(s) no Outlook!', 'ok');
+    } else {
+      showAlert('alertProc', '\u26a0 Nenhum e-mail dispon\u00edvel. Preencha os e-mails primeiro.', 'warn');
+    }
+    loadProcs(); loadStatus();
   } catch(e) { showAlert('alertProc', 'Erro de conex\u00e3o.', 'err'); }
   btn.disabled = false; btn.textContent = '\u2709\ufe0f Abrir no Outlook';
 }
 
 async function enviarEmailUnico(id) {
   try {
-    baixarEml(id);
-    showAlert('alertProc', '\u2709\ufe0f Rascunho aberto no Outlook!', 'ok');
+    const d = await fetchJSON(API + '/email/preview/' + id);
+    if (d.ok && d.preview) {
+      abrirNoOutlook(d.preview.to, d.preview.subject, d.preview.body);
+      showAlert('alertProc', '\u2709\ufe0f Rascunho aberto no Outlook!', 'ok');
+    } else {
+      showAlert('alertProc', d.erro || 'Erro: preencha o e-mail primeiro.', 'err');
+    }
     loadProcs(); loadStatus();
   } catch(e) { showAlert('alertProc', 'Erro ao abrir rascunho.', 'err'); }
 }
@@ -1495,20 +1503,22 @@ async function criarEAbrirRascunhos() {
       if (btn) { btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar + Abrir no Outlook'; }
       return;
     }
-    const d = await postJSON(API + '/rascunhos/eml-lote', { processo_ids: idsComEmail });
-    if (d.ok) {
-      let baixados = 0;
-      for (const r of d.resultados) {
-        if (r.ok) {
-          baixarEml(r.id);
-          baixados++;
+    let abertos = 0;
+    for (const pid of idsComEmail) {
+      try {
+        const d = await fetchJSON(API + '/email/preview/' + pid);
+        if (d.ok && d.preview) {
+          abrirNoOutlook(d.preview.to, d.preview.subject, d.preview.body);
+          abertos++;
           await new Promise(ok => setTimeout(ok, 800));
         }
-      }
-      showAlertTexto('\u2709\ufe0f ' + baixados + ' rascunho(s) aberto(s) no Outlook!', 'ok');
+      } catch(e) {}
+    }
+    if (abertos) {
+      showAlertTexto('\u2709\ufe0f ' + abertos + ' e-mail(s) aberto(s) no Outlook!', 'ok');
       loadProcs(); loadStatus();
     } else {
-      showAlertTexto(d.erro || 'Erro ao gerar rascunhos.', 'err');
+      showAlertTexto('\u26a0 Nenhum e-mail dispon\u00edvel.', 'warn');
     }
   } catch(e) { showAlertTexto('Erro de conex\u00e3o.', 'err'); }
   if (btn) { btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar + Abrir no Outlook'; }

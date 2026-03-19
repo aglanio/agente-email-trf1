@@ -667,7 +667,8 @@ def gerar_eml(processo_id: int):
     return FileResponse(
         path=str(eml_path),
         filename=filename,
-        media_type="message/rfc822",
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
