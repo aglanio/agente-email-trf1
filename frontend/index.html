@@ -135,8 +135,8 @@
           <option value="rascunho">Rascunho</option>
           <option value="enviado">Enviado</option>
         </select>
-        <button class="btn btn-p" id="btnRascLote">&#9993;&#65039; Enviar E-mails</button>
-        <button class="btn btn-s" id="btnPreviewLote" title="Ver preview antes de enviar">&#128065; Preview</button>
+        <button class="btn btn-p" id="btnRascLote">&#9993;&#65039; Abrir no Outlook</button>
+        <button class="btn btn-s" id="btnPreviewLote" title="Ver preview antes de abrir">&#128065; Preview</button>
         <button class="btn btn-s" id="btnRefresh">&#8635;</button>
       </div>
       <div id="alertProc"></div>
@@ -391,7 +391,7 @@
     <div id="modalProcContent"></div>
     <div class="modal-footer">
       <button class="btn btn-s" id="btnModalFechar">Fechar</button>
-      <button class="btn btn-ok" id="btnModalRasc">📧 Enviar E-mail</button>
+      <button class="btn btn-ok" id="btnModalRasc">&#9993;&#65039; Abrir no Outlook</button>
     </div>
   </div>
 </div>
@@ -711,46 +711,47 @@ function mkBadge(txt, cls) {
 async function enviarEmailLote() {
   const ids = [...document.querySelectorAll('.ck-proc:checked')].map(c => parseInt(c.value));
   if (!ids.length) { showAlert('alertProc', 'Selecione ao menos um processo.', 'warn'); return; }
-  if (!confirm('Enviar e-mail para ' + ids.length + ' processo(s) selecionados?')) return;
   const btn = document.getElementById('btnRascLote');
-  btn.disabled = true; btn.textContent = '\u23f3 Enviando...';
+  btn.disabled = true; btn.textContent = '\u23f3 Gerando rascunhos...';
   try {
-    const d = await postJSON(API + '/email/enviar-lote', {processo_ids: ids});
+    const d = await postJSON(API + '/rascunhos/eml-lote', {processo_ids: ids});
     if (d.ok) {
-      showAlert('alertProc', '\u2705 ' + d.sucessos + ' e-mail(s) enviado(s) com sucesso!' + (d.erros.length ? ' (' + d.erros.length + ' erro(s))' : ''), 'ok');
+      let baixados = 0;
+      for (const r of d.resultados) {
+        if (r.ok && r.filename) {
+          // Baixa cada .eml
+          const a = document.createElement('a');
+          a.href = API + '/rascunhos/eml/' + r.id;
+          a.download = r.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          baixados++;
+          await new Promise(ok => setTimeout(ok, 500)); // delay entre downloads
+        }
+      }
+      const erros = d.resultados.filter(r => !r.ok);
+      showAlert('alertProc', '\u2709\ufe0f ' + baixados + ' rascunho(s) baixado(s). Abra no Outlook para revisar e enviar.' + (erros.length ? ' (' + erros.length + ' erro(s))' : ''), 'ok');
       loadProcs(); loadStatus();
     } else {
-      showAlert('alertProc', d.erro || 'Erro ao enviar e-mails.', 'err');
+      showAlert('alertProc', d.erro || 'Erro ao gerar rascunhos.', 'err');
     }
-  } catch(e) { showAlert('alertProc', 'Erro de conexão.', 'err'); }
-  btn.disabled = false; btn.textContent = '\u2709\ufe0f Enviar E-mails';
+  } catch(e) { showAlert('alertProc', 'Erro de conex\u00e3o.', 'err'); }
+  btn.disabled = false; btn.textContent = '\u2709\ufe0f Abrir no Outlook';
 }
 
 async function enviarEmailUnico(id) {
+  // Baixa .eml para abrir no Outlook
   try {
-    // Primeiro mostra preview
-    const prev = await fetchJSON(API + '/email/preview/' + id);
-    if (prev.ok) {
-      const p = prev.preview;
-      const confirma = confirm(
-        'Enviar e-mail?\n\nPara: ' + p.to +
-        '\nAssunto: ' + p.subject +
-        '\nAnexos: ' + (p.attachments.length ? p.attachments.join(', ') : 'nenhum') +
-        '\n\n(Clique OK para enviar)'
-      );
-      if (!confirma) return;
-    }
-    const d = await fetchJSON(API + '/email/enviar/' + id);
-    if (!d.ok) {
-      // Tenta via POST
-      const d2 = await postJSON(API + '/email/enviar/' + id, {});
-      if (d2.ok) { showAlert('alertProc', '\u2705 E-mail enviado com sucesso!', 'ok'); loadProcs(); loadStatus(); }
-      else showAlert('alertProc', d2.erro || 'Erro ao enviar.', 'err');
-      return;
-    }
-    showAlert('alertProc', '\u2705 E-mail enviado com sucesso!', 'ok');
+    const a = document.createElement('a');
+    a.href = API + '/rascunhos/eml/' + id;
+    a.download = 'rascunho_' + id + '.eml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showAlert('alertProc', '\u2709\ufe0f Rascunho baixado! Abra o arquivo .eml no Outlook para revisar e enviar.', 'ok');
     loadProcs(); loadStatus();
-  } catch(e) { showAlert('alertProc', 'Erro de conexão.', 'err'); }
+  } catch(e) { showAlert('alertProc', 'Erro ao baixar rascunho.', 'err'); }
 }
 
 async function previewLote() {
@@ -765,7 +766,7 @@ async function previewLote() {
       }
     } catch(e) {}
   }
-  alert('Preview dos e-mails:\n\n' + (previewText || 'Nenhum e-mail disponível'));
+  alert('Preview dos e-mails:\n\n' + (previewText || 'Nenhum e-mail dispon\u00edvel'));
 }
 
 // Mantém compatibilidade com chamadas antigas
@@ -1307,7 +1308,7 @@ function renderTextExtraidos() {
   const btnR = document.createElement('button');
   btnR.className = 'btn'; btnR.id = 'btnRascTexto';
   btnR.style.cssText = 'background:rgba(34,197,94,.2);color:var(--green)';
-  btnR.textContent = '📧 Criar + Enviar E-mails';
+  btnR.textContent = '📧 Criar + Abrir no Outlook';
   btnR.addEventListener('click', criarEAbrirRascunhos);
   btns.appendChild(btnR);
 
@@ -1482,20 +1483,37 @@ async function criarEAbrirRascunhos() {
     } catch(e) {}
   }
 
-  if (btn) btn.textContent = '\u23f3 Enviando e-mails...';
+  if (btn) btn.textContent = '\u23f3 Gerando rascunhos...';
 
   try {
-    const d = await postJSON(API + '/email/enviar-lote', { processo_ids: comId.map(i => i.id) });
+    const idsComEmail = comId.filter(i => i.email).map(i => i.id);
+    if (!idsComEmail.length) {
+      showAlertTexto('\u26a0 Nenhum processo com e-mail definido.', 'warn');
+      if (btn) { btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar + Abrir no Outlook'; }
+      return;
+    }
+    const d = await postJSON(API + '/rascunhos/eml-lote', { processo_ids: idsComEmail });
     if (d.ok) {
-      const msg = d.sucessos + ' e-mail(s) enviado(s) com sucesso!' +
-        (d.erros && d.erros.length ? ' (' + d.erros.length + ' erro(s))' : '');
-      showAlertTexto('\u2705 ' + msg, 'ok');
+      let baixados = 0;
+      for (const r of d.resultados) {
+        if (r.ok && r.filename) {
+          const a = document.createElement('a');
+          a.href = API + '/rascunhos/eml/' + r.id;
+          a.download = r.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          baixados++;
+          await new Promise(ok => setTimeout(ok, 500));
+        }
+      }
+      showAlertTexto('\u2709\ufe0f ' + baixados + ' rascunho(s) baixado(s). Abra no Outlook para revisar e enviar.', 'ok');
       loadProcs(); loadStatus();
     } else {
-      showAlertTexto(d.erro || 'Erro ao enviar e-mails.', 'err');
+      showAlertTexto(d.erro || 'Erro ao gerar rascunhos.', 'err');
     }
-  } catch(e) { showAlertTexto('Erro de conexão.', 'err'); }
-  if (btn) { btn.disabled = false; btn.textContent = '📧 Criar + Enviar E-mails'; }
+  } catch(e) { showAlertTexto('Erro de conex\u00e3o.', 'err'); }
+  if (btn) { btn.disabled = false; btn.textContent = '\u2709\ufe0f Criar + Abrir no Outlook'; }
 }
 
 async function puxarArquivosPje() {
@@ -1546,7 +1564,7 @@ async function puxarArquivosPje() {
             showAlertTexto('\u2705 ' + msgDownload + ' ' + dr.sucessos + ' e-mail(s) enviado(s) com PDF em anexo!', 'ok');
             loadProcs(); loadStatus();
           } else if (dr.ok && dr.sucessos === 0) {
-            showAlertTexto('\u26a0 PDFs baixados, mas sem e-mail definido. Preencha o e-mail e clique "Criar + Enviar E-mails".', 'warn');
+            showAlertTexto('\u26a0 PDFs baixados, mas sem e-mail definido. Preencha o e-mail e clique "Criar + Abrir no Outlook".', 'warn');
             loadProcs();
           } else {
             showAlertTexto('\u2705 ' + msgDownload + ' (Erro ao enviar: ' + (dr.erro||'') + ')', 'warn');

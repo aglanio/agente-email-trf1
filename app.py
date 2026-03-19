@@ -610,6 +610,122 @@ def criar_rascunho_unico(processo_id: int):
     return res
 
 
+# ── Gerar .eml para abrir no Outlook ─────────────────────────────────────────
+
+@app.get("/api/rascunhos/eml/{processo_id}")
+def gerar_eml(processo_id: int):
+    """Gera arquivo .eml que o usuário baixa e abre no Outlook para revisar e enviar."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM processos WHERE id = ?", (processo_id,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(404, "Processo não encontrado")
+
+    p = dict(row)
+    if not p.get("email_destinatario"):
+        raise HTTPException(400, "E-mail do destinatário não encontrado")
+
+    from pdf_extractor import montar_corpo
+    corpo = montar_corpo(p)
+    assunto = p.get("assunto_email") or f"Processo {p.get('numero_processo', '')}"
+
+    # Monta mensagem MIME
+    msg = MIMEMultipart()
+    msg["From"] = REMETENTE
+    msg["To"] = p["email_destinatario"]
+    msg["Subject"] = assunto
+    msg["X-Unsent"] = "1"  # Marca como NÃO enviado — Outlook abre em modo compose
+    msg.attach(MIMEText(corpo, "plain", "utf-8"))
+
+    # Anexar arquivos
+    for filepath in [p.get("arquivo_mandado"), p.get("arquivo_anexo")]:
+        if filepath and Path(filepath).exists():
+            part = MIMEBase("application", "octet-stream")
+            with open(filepath, "rb") as f:
+                part.set_payload(f.read())
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", f"attachment; filename={Path(filepath).name}")
+            msg.attach(part)
+
+    # Atualiza status
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE processos SET status = 'rascunho' WHERE id = ?", (processo_id,))
+    conn.commit()
+    conn.close()
+
+    # Salva .eml temporário e retorna
+    numero = p.get("numero_processo", str(processo_id)).replace("/", "-")
+    filename = f"rascunho_{numero}.eml"
+    eml_path = DOWNLOADS_DIR / filename
+    with open(eml_path, "w", encoding="utf-8") as f:
+        f.write(msg.as_string())
+
+    return FileResponse(
+        path=str(eml_path),
+        filename=filename,
+        media_type="message/rfc822",
+    )
+
+
+@app.post("/api/rascunhos/eml-lote")
+def gerar_eml_lote(data: RascunhoRequest):
+    """Gera .eml para múltiplos processos. Retorna lista de IDs com download disponível."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    resultados = []
+    for pid in data.processo_ids:
+        cur.execute("SELECT * FROM processos WHERE id = ?", (pid,))
+        row = cur.fetchone()
+        if not row:
+            resultados.append({"id": pid, "ok": False, "erro": "Não encontrado"})
+            continue
+        p = dict(row)
+        if not p.get("email_destinatario"):
+            resultados.append({"id": pid, "ok": False, "erro": "Sem e-mail", "numero_processo": p.get("numero_processo", "")})
+            continue
+
+        from pdf_extractor import montar_corpo
+        corpo = montar_corpo(p)
+        assunto = p.get("assunto_email") or f"Processo {p.get('numero_processo', '')}"
+
+        msg = MIMEMultipart()
+        msg["From"] = REMETENTE
+        msg["To"] = p["email_destinatario"]
+        msg["Subject"] = assunto
+        msg["X-Unsent"] = "1"
+        msg.attach(MIMEText(corpo, "plain", "utf-8"))
+
+        for filepath in [p.get("arquivo_mandado"), p.get("arquivo_anexo")]:
+            if filepath and Path(filepath).exists():
+                part = MIMEBase("application", "octet-stream")
+                with open(filepath, "rb") as f:
+                    part.set_payload(f.read())
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", f"attachment; filename={Path(filepath).name}")
+                msg.attach(part)
+
+        numero = p.get("numero_processo", str(pid)).replace("/", "-")
+        filename = f"rascunho_{numero}.eml"
+        eml_path = DOWNLOADS_DIR / filename
+        with open(eml_path, "w", encoding="utf-8") as f:
+            f.write(msg.as_string())
+
+        conn.execute("UPDATE processos SET status = 'rascunho' WHERE id = ?", (pid,))
+        resultados.append({"id": pid, "ok": True, "numero_processo": p.get("numero_processo", ""), "filename": filename})
+
+    conn.commit()
+    conn.close()
+
+    sucessos = sum(1 for r in resultados if r.get("ok"))
+    return {"ok": True, "total": len(resultados), "sucessos": sucessos, "resultados": resultados}
+
+
 # ── Envio direto via SMTP ────────────────────────────────────────────────────
 
 class EnvioRequest(BaseModel):
