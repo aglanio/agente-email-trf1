@@ -197,6 +197,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Processo", "X-Email", "X-Acao", "X-Id"],
 )
 
 @app.on_event("startup")
@@ -927,7 +928,762 @@ def listar_templates():
     return {"templates": rows}
 
 
-# ── PJe Download ──────────────────────────────────────────────────────────────
+# ── Upload em Lote de PDFs ────────────────────────────────────────────────────
+
+@app.post("/api/processos/upload-lote")
+async def upload_lote(arquivos: list[UploadFile] = File(...)):
+    """
+    Recebe múltiplos PDFs de uma vez.
+    Extrai o número CNJ de cada um e cria/atualiza processos automaticamente.
+    Tenta parear mandado+anexo pelo número do processo.
+    """
+    resultados = []
+    # Primeiro, salvar todos e extrair info
+    infos = []
+    for arq in arquivos:
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+        path = DOWNLOADS_DIR / f"lote_{ts}_{arq.filename}"
+        with open(path, "wb") as f:
+            f.write(await arq.read())
+        info = extrair_info_pdf(str(path))
+        info["_path"] = str(path)
+        info["_filename"] = arq.filename or ""
+        infos.append(info)
+
+    # Agrupar por número de processo
+    por_processo = {}
+    sem_numero = []
+    for info in infos:
+        num = info.get("numero_processo", "")
+        if num:
+            por_processo.setdefault(num, []).append(info)
+        else:
+            sem_numero.append(info)
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    for num, docs in por_processo.items():
+        # Decidir qual é mandado e qual é anexo
+        mandado_path = None
+        anexo_path = None
+        info_principal = docs[0]
+
+        for doc in docs:
+            fname = doc["_filename"].lower()
+            if "anexo" in fname:
+                anexo_path = doc["_path"]
+            elif "mandado" in fname or not mandado_path:
+                mandado_path = doc["_path"]
+                info_principal = doc
+
+        # Se tem 2+ docs e nenhum foi identificado como anexo, o segundo vira anexo
+        if len(docs) >= 2 and not anexo_path:
+            for doc in docs:
+                if doc["_path"] != mandado_path:
+                    anexo_path = doc["_path"]
+                    break
+
+        # Buscar email
+        destinatario = info_principal.get("destinatario") or ""
+        email_result = buscar_email_completo(destinatario) if destinatario else {}
+        assunto = montar_assunto(info_principal)
+
+        # Verificar se processo já existe
+        cur.execute("SELECT id FROM processos WHERE numero_processo = ?", (num,))
+        existing = cur.fetchone()
+
+        if existing:
+            # Atualizar arquivos
+            updates = {}
+            if mandado_path:
+                updates["arquivo_mandado"] = mandado_path
+            if anexo_path:
+                updates["arquivo_anexo"] = anexo_path
+            if updates:
+                sets = ", ".join(f"{k} = ?" for k in updates)
+                vals = list(updates.values()) + [existing[0]]
+                cur.execute(f"UPDATE processos SET {sets} WHERE id = ?", vals)
+            resultados.append({
+                "numero_processo": num, "acao": "atualizado",
+                "id": existing[0], "ok": True,
+            })
+        else:
+            cur.execute(
+                """INSERT INTO processos
+                   (numero_processo, tipo, destinatario, endereco_destinatario,
+                    email_destinatario, email_encontrado_em, assunto_email,
+                    arquivo_mandado, arquivo_anexo, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente')""",
+                (
+                    num,
+                    info_principal.get("tipo", "intimacao"),
+                    destinatario,
+                    info_principal.get("endereco", ""),
+                    email_result.get("email", ""),
+                    email_result.get("fonte", ""),
+                    assunto,
+                    mandado_path,
+                    anexo_path,
+                ),
+            )
+            resultados.append({
+                "numero_processo": num, "acao": "criado",
+                "id": cur.lastrowid, "ok": True,
+                "destinatario": destinatario,
+                "email": email_result.get("email", ""),
+            })
+
+    # PDFs sem número CNJ
+    for info in sem_numero:
+        resultados.append({
+            "numero_processo": "", "acao": "ignorado",
+            "ok": False, "erro": "Número CNJ não encontrado",
+            "arquivo": info["_filename"],
+        })
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "total": len(arquivos),
+        "processados": len(por_processo),
+        "ignorados": len(sem_numero),
+        "resultados": resultados,
+    }
+
+
+# ── Captura HTML do PJe (Bookmarklet) ────────────────────────────────────────
+
+class CapturaPainelRequest(BaseModel):
+    processos: list[dict]  # [{numero, destinatario, endereco, tipo}, ...]
+
+@app.post("/api/pje/captura-painel")
+async def captura_painel_pje(data: CapturaPainelRequest):
+    """
+    Recebe múltiplos processos extraídos do painel PJe via bookmarklet.
+    Cria todos de uma vez.
+    """
+    import re as _re
+    from pdf_extractor import _extrair_email_pje
+
+    resultados = []
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    for proc in data.processos:
+        numero = proc.get("numero", "").strip()
+        if not numero:
+            continue
+
+        destinatario = proc.get("destinatario", "").strip()
+        endereco = proc.get("endereco", "").strip()
+        tipo = proc.get("tipo", "intimacao").strip()
+
+        # Extrair email do endereço (padrão PJe sem @)
+        email_direto = _extrair_email_pje(endereco) if endereco else ""
+        email_result = {}
+        if email_direto:
+            email_result = {"email": email_direto, "fonte": "pje_endereco"}
+        elif destinatario:
+            email_result = buscar_email_completo(destinatario)
+
+        email = email_result.get("email", "")
+        fonte = email_result.get("fonte", "")
+
+        # Verificar se já existe
+        cur.execute("SELECT id, email_destinatario FROM processos WHERE numero_processo = ?", (numero,))
+        existing = cur.fetchone()
+
+        if existing:
+            updates = {}
+            if destinatario:
+                updates["destinatario"] = destinatario
+            if email and not existing[1]:
+                updates["email_destinatario"] = email
+                updates["email_encontrado_em"] = fonte
+            if updates:
+                sets = ", ".join(f"{k} = ?" for k in updates)
+                vals = list(updates.values()) + [existing[0]]
+                cur.execute(f"UPDATE processos SET {sets} WHERE id = ?", vals)
+            resultados.append({"numero": numero, "id": existing[0], "acao": "atualizado",
+                               "email": email or (existing[1] or ""), "ok": True})
+        else:
+            assunto = f"Intimação - Processo {numero} - SJPI"
+            cur.execute(
+                """INSERT INTO processos
+                   (numero_processo, tipo, destinatario, endereco_destinatario,
+                    email_destinatario, email_encontrado_em, assunto_email, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'pendente')""",
+                (numero, tipo or "intimacao", destinatario, endereco, email, fonte, assunto),
+            )
+            resultados.append({"numero": numero, "id": cur.lastrowid, "acao": "criado",
+                               "email": email, "ok": True})
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "total": len(resultados),
+        "criados": sum(1 for r in resultados if r["acao"] == "criado"),
+        "atualizados": sum(1 for r in resultados if r["acao"] == "atualizado"),
+        "com_email": sum(1 for r in resultados if r.get("email")),
+        "resultados": resultados,
+    }
+
+
+class CapturaHtmlRequest(BaseModel):
+    html: str
+    url: Optional[str] = ""
+    titulo: Optional[str] = ""
+
+@app.post("/api/pje/captura-pdf")
+async def captura_pdf_pje(data: CapturaHtmlRequest):
+    """
+    Recebe HTML do mandado e devolve o PDF para download.
+    Também cria/atualiza o processo no banco.
+    """
+    import re as _re
+    import html as html_mod
+    from pdf_extractor import _extrair_email_pje
+
+    html_content = data.html
+    if not html_content or len(html_content) < 50:
+        raise HTTPException(400, "HTML vazio")
+
+    # Extrair número CNJ
+    num_match = _re.search(r'\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}', html_content)
+    numero_processo = num_match.group(0) if num_match else ""
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    num_safe = numero_processo.replace("-", "_").replace(".", "_") if numero_processo else ts
+
+    # Salvar HTML com estilos inline para imprimir bonito
+    html_completo = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>body{{font-family:serif;margin:20mm;font-size:12pt}}
+table{{border-collapse:collapse;width:100%}}
+td,th{{border:1px solid #ccc;padding:4px 8px;font-size:11pt}}</style>
+</head><body>{html_content}</body></html>"""
+
+    pdf_path = DOWNLOADS_DIR / f"mandado_{num_safe}.pdf"
+    html_path = DOWNLOADS_DIR / f"mandado_{num_safe}.html"
+
+    # Salvar HTML sempre (funciona como fallback e para anexar no email)
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html_completo)
+
+    # Tentar converter pra PDF
+    pdf_ok = False
+    try:
+        from weasyprint import HTML as WeasyprintHTML
+        WeasyprintHTML(string=html_completo).write_pdf(str(pdf_path))
+        pdf_ok = True
+    except Exception:
+        pass
+
+    arquivo_final = str(pdf_path) if pdf_ok else str(html_path)
+
+    # Extrair info do texto
+    texto_limpo = _re.sub(r'<[^>]+>', ' ', html_content)
+    texto_limpo = html_mod.unescape(texto_limpo)
+
+    # Destinatário
+    destinatario = ""
+    dest_match = _re.search(
+        r'INTIMA[ÇC][ÃA]O\s+DE[:\s]+(.+?)(?:\n|Endere)',
+        texto_limpo, _re.IGNORECASE | _re.DOTALL
+    )
+    if dest_match:
+        destinatario = dest_match.group(1).strip()[:200]
+    if not destinatario:
+        dest2 = _re.search(r'Destinat[aá]rio\(?s?\)?\s*(.+?)(?:\s{3,}|Rua |Endere|CEP|Expedi)',
+                           texto_limpo, _re.IGNORECASE)
+        if dest2:
+            destinatario = dest2.group(1).strip()[:200]
+
+    # Email
+    email_direto = _extrair_email_pje(texto_limpo)
+    email_result = {}
+    if email_direto:
+        email_result = {"email": email_direto, "fonte": "pje_endereco"}
+    elif destinatario:
+        email_result = buscar_email_completo(destinatario)
+    email = email_result.get("email", "")
+
+    # Criar/atualizar processo
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    acao = "criado"
+
+    if numero_processo:
+        cur.execute("SELECT id, email_destinatario FROM processos WHERE numero_processo = ?", (numero_processo,))
+        existing = cur.fetchone()
+        if existing:
+            updates = {"arquivo_mandado": arquivo_final}
+            if destinatario:
+                updates["destinatario"] = destinatario
+            if email and not existing[1]:
+                updates["email_destinatario"] = email
+                updates["email_encontrado_em"] = email_result.get("fonte", "")
+            sets = ", ".join(f"{k} = ?" for k in updates)
+            vals = list(updates.values()) + [existing[0]]
+            cur.execute(f"UPDATE processos SET {sets} WHERE id = ?", vals)
+            conn.commit()
+            conn.close()
+            # Retornar arquivo para download
+            return FileResponse(
+                arquivo_final,
+                filename=f"mandado_{num_safe}.{'pdf' if pdf_ok else 'html'}",
+                media_type="application/pdf" if pdf_ok else "text/html",
+                headers={
+                    "X-Processo": numero_processo,
+                    "X-Email": email or "",
+                    "X-Acao": "atualizado",
+                    "X-Id": str(existing[0]),
+                },
+            )
+
+    assunto = f"Intimação - Processo {numero_processo} - SJPI" if numero_processo else "Intimação - SJPI"
+    cur.execute(
+        """INSERT INTO processos
+           (numero_processo, tipo, destinatario, email_destinatario,
+            email_encontrado_em, assunto_email, arquivo_mandado, status)
+           VALUES (?, 'intimacao', ?, ?, ?, ?, ?, 'pendente')""",
+        (numero_processo, destinatario, email, email_result.get("fonte", ""), assunto, arquivo_final),
+    )
+    pid = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    return FileResponse(
+        arquivo_final,
+        filename=f"mandado_{num_safe}.{'pdf' if pdf_ok else 'html'}",
+        media_type="application/pdf" if pdf_ok else "text/html",
+        headers={
+            "X-Processo": numero_processo,
+            "X-Email": email or "",
+            "X-Acao": "criado",
+            "X-Id": str(pid),
+        },
+    )
+
+
+@app.post("/api/pje/captura-html")
+async def captura_html_pje(data: CapturaHtmlRequest):
+    """
+    Recebe HTML capturado do PJe via bookmarklet.
+    Converte para PDF e cria processo.
+    """
+    import re as _re
+
+    html = data.html
+    if not html or len(html) < 50:
+        raise HTTPException(400, "HTML vazio ou muito curto")
+
+    # Extrair número CNJ do HTML
+    num_match = _re.search(r'\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}', html)
+    numero_processo = num_match.group(0) if num_match else ""
+
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    num_safe = numero_processo.replace("-", "_").replace(".", "_") if numero_processo else ts
+
+    # Tentar converter HTML para PDF
+    pdf_path = DOWNLOADS_DIR / f"pje_captura_{num_safe}.pdf"
+    pdf_ok = False
+
+    # Método 1: weasyprint
+    try:
+        from weasyprint import HTML as WeasyprintHTML
+        WeasyprintHTML(string=html).write_pdf(str(pdf_path))
+        pdf_ok = True
+    except Exception:
+        pass
+
+    # Método 2: salvar como HTML (fallback)
+    if not pdf_ok:
+        html_path = DOWNLOADS_DIR / f"pje_captura_{num_safe}.html"
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        # Usar o HTML como "mandado"
+        pdf_path = html_path
+
+    # Extrair info do texto do HTML
+    import html as html_mod
+    texto_limpo = _re.sub(r'<[^>]+>', ' ', html)
+    texto_limpo = html_mod.unescape(texto_limpo)
+
+    # Buscar destinatário — múltiplos padrões
+    destinatario = ""
+    # Padrão 1: "INTIMAÇÃO DE: ..."
+    dest_match = _re.search(
+        r'INTIMA[ÇC][ÃA]O\s+DE[:\s]+(.+?)(?:\n|Endere)',
+        texto_limpo, _re.IGNORECASE | _re.DOTALL
+    )
+    if dest_match:
+        destinatario = dest_match.group(1).strip()[:200]
+    # Padrão 2: "Destinatário(s) ..." (painel PJe)
+    if not destinatario:
+        dest2 = _re.search(r'Destinat[aá]rio\(?s?\)?\s*(.+?)(?:\s{3,}|Rua |Endere|CEP|Expedi)',
+                           texto_limpo, _re.IGNORECASE)
+        if dest2:
+            destinatario = dest2.group(1).strip()[:200]
+
+    # Extrair email direto do HTML (padrão PJe: email sem @ no endereço)
+    from pdf_extractor import _extrair_email_pje
+    email_direto = _extrair_email_pje(texto_limpo)
+
+    email_result = {}
+    if email_direto:
+        email_result = {"email": email_direto, "fonte": "pje_endereco"}
+    elif destinatario:
+        email_result = buscar_email_completo(destinatario)
+
+    # Criar processo
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    # Verificar se já existe
+    if numero_processo:
+        cur.execute("SELECT id, email_destinatario FROM processos WHERE numero_processo = ?", (numero_processo,))
+        existing = cur.fetchone()
+        if existing:
+            updates = {"arquivo_mandado": str(pdf_path)}
+            # Atualizar destinatário e email se não tinha antes
+            if destinatario:
+                updates["destinatario"] = destinatario
+            email_final = email_result.get("email", "")
+            if email_final and not existing[1]:
+                updates["email_destinatario"] = email_final
+                if email_result.get("fonte"):
+                    updates["email_encontrado_em"] = email_result["fonte"]
+            sets = ", ".join(f"{k} = ?" for k in updates)
+            vals = list(updates.values()) + [existing[0]]
+            cur.execute(f"UPDATE processos SET {sets} WHERE id = ?", vals)
+            conn.commit()
+            conn.close()
+            return {"ok": True, "id": existing[0], "acao": "atualizado",
+                    "numero_processo": numero_processo,
+                    "destinatario": destinatario,
+                    "email": email_final or (existing[1] or ""),
+                    "pdf": pdf_ok}
+
+    assunto = f"Intimação - Processo {numero_processo} - SJPI" if numero_processo else "Intimação - SJPI"
+    cur.execute(
+        """INSERT INTO processos
+           (numero_processo, tipo, destinatario, email_destinatario,
+            email_encontrado_em, assunto_email, arquivo_mandado, status)
+           VALUES (?, 'intimacao', ?, ?, ?, ?, ?, 'pendente')""",
+        (
+            numero_processo, destinatario,
+            email_result.get("email", ""),
+            email_result.get("fonte", ""),
+            assunto, str(pdf_path),
+        ),
+    )
+    pid = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True, "id": pid, "acao": "criado",
+        "numero_processo": numero_processo,
+        "destinatario": destinatario,
+        "email": email_result.get("email", ""),
+        "pdf": pdf_ok,
+    }
+
+
+# ── Monitorar pasta Downloads ─────────────────────────────────────────────────
+
+_watcher_running = False
+
+@app.post("/api/watcher/iniciar")
+def iniciar_watcher():
+    """Inicia monitoramento da pasta Downloads do usuário."""
+    global _watcher_running
+    import threading
+
+    downloads_path = Path(os.environ.get("USERPROFILE", r"C:\Users\aglan")) / "Downloads"
+    if not downloads_path.exists():
+        return {"ok": False, "erro": "Pasta Downloads não encontrada"}
+
+    if _watcher_running:
+        return {"ok": True, "msg": "Watcher já está rodando", "pasta": str(downloads_path)}
+
+    def watch_loop():
+        global _watcher_running
+        _watcher_running = True
+        import time
+        seen = set()
+        # Marcar arquivos existentes como já vistos
+        for f in downloads_path.glob("*.pdf"):
+            seen.add(f.name)
+        for f in downloads_path.glob("*.html"):
+            seen.add(f.name)
+
+        while _watcher_running:
+            try:
+                for ext in ["*.pdf", "*.html"]:
+                    for f in downloads_path.glob(ext):
+                        if f.name in seen:
+                            continue
+                        # Esperar arquivo terminar de ser escrito
+                        time.sleep(1)
+                        try:
+                            size1 = f.stat().st_size
+                            time.sleep(0.5)
+                            size2 = f.stat().st_size
+                            if size1 != size2:
+                                continue  # Ainda escrevendo
+                        except Exception:
+                            continue
+
+                        seen.add(f.name)
+
+                        # Só processar se parece ser do PJe (tem mandado/intimação no nome ou conteúdo)
+                        fname_lower = f.name.lower()
+                        is_pje = any(kw in fname_lower for kw in
+                                     ["mandado", "intimacao", "intimação", "citacao", "citação", "pje"])
+
+                        if not is_pje and f.suffix == ".pdf":
+                            # Verificar conteúdo
+                            try:
+                                info = extrair_info_pdf(str(f))
+                                if info.get("numero_processo"):
+                                    is_pje = True
+                            except Exception:
+                                pass
+
+                        if not is_pje:
+                            continue
+
+                        # Importar o arquivo
+                        try:
+                            _importar_arquivo_watcher(f)
+                        except Exception as e:
+                            print(f"[watcher] Erro ao importar {f.name}: {e}")
+
+                time.sleep(2)
+            except Exception as e:
+                print(f"[watcher] Erro: {e}")
+                time.sleep(5)
+
+    t = threading.Thread(target=watch_loop, daemon=True)
+    t.start()
+    return {"ok": True, "msg": "Watcher iniciado", "pasta": str(downloads_path)}
+
+
+@app.post("/api/watcher/parar")
+def parar_watcher():
+    global _watcher_running
+    _watcher_running = False
+    return {"ok": True, "msg": "Watcher parado"}
+
+
+@app.get("/api/watcher/status")
+def status_watcher():
+    return {"rodando": _watcher_running}
+
+
+def _importar_arquivo_watcher(filepath: Path):
+    """Importa um PDF/HTML da pasta Downloads para o sistema."""
+    # Copiar para downloads do app
+    dest = DOWNLOADS_DIR / f"watcher_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filepath.name}"
+    shutil.copy2(str(filepath), str(dest))
+
+    # Extrair info
+    if filepath.suffix == ".pdf":
+        info = extrair_info_pdf(str(dest))
+    else:
+        # HTML - extrair texto
+        import re as _re
+        import html as html_mod
+        with open(dest, "r", encoding="utf-8", errors="ignore") as f:
+            html_content = f.read()
+        texto = _re.sub(r'<[^>]+>', ' ', html_content)
+        texto = html_mod.unescape(texto)
+        num_match = _re.search(r'\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}', texto)
+        info = {
+            "numero_processo": num_match.group(0) if num_match else "",
+            "destinatario": "",
+            "tipo": "intimacao",
+            "endereco": "",
+            "texto_completo": texto,
+        }
+
+    numero = info.get("numero_processo", "")
+    if not numero:
+        return
+
+    destinatario = info.get("destinatario", "")
+    from pdf_extractor import _extrair_email_pje
+    email_direto = _extrair_email_pje(info.get("texto_completo", "") or info.get("endereco", ""))
+    email_result = {}
+    if email_direto:
+        email_result = {"email": email_direto, "fonte": "pje_endereco"}
+    elif destinatario:
+        email_result = buscar_email_completo(destinatario)
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM processos WHERE numero_processo = ?", (numero,))
+    existing = cur.fetchone()
+
+    if existing:
+        cur.execute("UPDATE processos SET arquivo_mandado = ? WHERE id = ?",
+                    (str(dest), existing[0]))
+    else:
+        assunto = montar_assunto(info)
+        cur.execute(
+            """INSERT INTO processos
+               (numero_processo, tipo, destinatario, endereco_destinatario,
+                email_destinatario, email_encontrado_em, assunto_email,
+                arquivo_mandado, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente')""",
+            (numero, info.get("tipo", "intimacao"), destinatario,
+             info.get("endereco", ""), email_result.get("email", ""),
+             email_result.get("fonte", ""), assunto, str(dest)),
+        )
+
+    conn.commit()
+    conn.close()
+    print(f"[watcher] Importado: {numero} de {filepath.name}")
+
+
+# ── PJe Download Automático ───────────────────────────────────────────────────
+
+class PjePuxarRequest(BaseModel):
+    grau: int = 1
+
+@app.post("/api/pje/puxar-tudo")
+def pje_puxar_tudo(data: PjePuxarRequest):
+    """
+    Conecta ao Chrome via CDP e baixa TODOS os mandados do painel PJe.
+    Usa puxar_todos_pdfs.py (script que funciona perfeitamente).
+    Chrome precisa estar aberto com --remote-debugging-port=9222.
+    """
+    import asyncio
+    from puxar_todos_pdfs import puxar_todos
+    from pdf_extractor import extrair_info_pdf, _extrair_email_pje
+
+    # Rodar a função async em um event loop novo
+    loop = asyncio.new_event_loop()
+    try:
+        download_results = loop.run_until_complete(puxar_todos(grau=data.grau))
+    except Exception as e:
+        return {"ok": False, "erro": f"Erro ao puxar PDFs: {e}", "resultados": []}
+    finally:
+        loop.close()
+
+    if not download_results:
+        return {"ok": True, "total": 0, "baixados": 0,
+                "erro": "Nenhum processo encontrado no painel", "resultados": []}
+
+    total = len(download_results)
+    baixados = sum(1 for r in download_results if r.get("ok"))
+
+    # Processar cada PDF baixado: extrair info e salvar no banco
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    resultados_final = []
+
+    for r in download_results:
+        numero = r.get("numero", "")
+        pdf_path = r.get("path", "")
+        ok = r.get("ok", False)
+
+        resultado = {
+            "numero_processo": numero,
+            "ok": ok,
+            "erro": r.get("msg") if not ok else None,
+            "acao": None,
+            "email": "",
+        }
+
+        if not ok or not numero:
+            resultados_final.append(resultado)
+            continue
+
+        # Extrair info do PDF via pdf_extractor
+        info = {}
+        if pdf_path and os.path.exists(pdf_path):
+            info = extrair_info_pdf(pdf_path)
+
+        destinatario = info.get("destinatario", "")
+        endereco = info.get("endereco", "")
+        tipo = info.get("tipo", "intimacao") or "intimacao"
+
+        # Buscar email: primeiro do PDF, depois do endereço, depois da agenda
+        email = ""
+        email_fonte = ""
+        pdf_email = info.get("email", "")
+        if pdf_email:
+            email = pdf_email
+            email_fonte = "pdf_extraido"
+        else:
+            email_direto = _extrair_email_pje(endereco) if endereco else ""
+            if email_direto:
+                email = email_direto
+                email_fonte = "pje_endereco"
+            elif destinatario:
+                email_result = buscar_email_completo(destinatario)
+                email = email_result.get("email", "")
+                email_fonte = email_result.get("fonte", "")
+
+        assunto = montar_assunto(info)
+
+        # Verificar se já existe no banco
+        cur.execute("SELECT id FROM processos WHERE numero_processo = ?", (numero,))
+        existing = cur.fetchone()
+
+        if existing:
+            updates = {}
+            if pdf_path:
+                updates["arquivo_mandado"] = pdf_path
+            if destinatario:
+                updates["destinatario"] = destinatario
+            if endereco:
+                updates["endereco_destinatario"] = endereco
+            if email:
+                updates["email_destinatario"] = email
+                updates["email_encontrado_em"] = email_fonte
+            if tipo:
+                updates["tipo"] = tipo
+            if updates:
+                sets = ", ".join(f"{k} = ?" for k in updates)
+                vals = list(updates.values()) + [existing[0]]
+                cur.execute(f"UPDATE processos SET {sets} WHERE id = ?", vals)
+            resultado["id"] = existing[0]
+            resultado["acao"] = "atualizado"
+            resultado["email"] = email
+        else:
+            cur.execute(
+                """INSERT INTO processos
+                   (numero_processo, tipo, destinatario, endereco_destinatario,
+                    email_destinatario, email_encontrado_em, assunto_email,
+                    arquivo_mandado, status, grau)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?)""",
+                (numero, tipo, destinatario, endereco, email,
+                 email_fonte, assunto, pdf_path or "", data.grau),
+            )
+            resultado["id"] = cur.lastrowid
+            resultado["acao"] = "criado"
+            resultado["email"] = email
+
+        resultados_final.append(resultado)
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "total": total,
+        "baixados": baixados,
+        "resultados": resultados_final,
+    }
+
 
 class PjeRequest(BaseModel):
     processo_ids: list[int]

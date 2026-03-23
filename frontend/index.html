@@ -118,6 +118,7 @@
 <nav>
   <button class="active" data-page="processos">&#128203; Processos</button>
   <button data-page="upload">&#128228; Novo PDF</button>
+  <button data-page="lote">&#128230; Lote PDF</button>
   <button data-page="contatos">&#128218; Contatos</button>
   <button data-page="historico">&#128232; Hist&#243;rico</button>
   <button data-page="texto">&#128203; Colar Texto</button>
@@ -189,6 +190,68 @@
         &#128269; Extrair Informa&#231;&#245;es e Buscar E-mail
       </button>
       <div id="uploadRes" style="display:none;margin-top:16px"></div>
+    </div>
+  </div>
+
+  <!-- ── Lote PDF ─────────────────────────────────────────────── -->
+  <div id="page-lote" class="page">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+
+      <!-- Coluna 1: Upload em Lote -->
+      <div class="card">
+        <div class="card-title">&#128230; Upload em Lote de PDFs</div>
+        <p class="text2" style="margin-bottom:14px">Arraste v&#225;rios PDFs de uma vez. O sistema identifica o n&#250;mero CNJ de cada um e cria os processos automaticamente.</p>
+        <div class="upload-zone" id="zoneLote" style="min-height:180px;position:relative">
+          <input type="file" id="fileLote" accept=".pdf" multiple>
+          <div class="upload-icon">&#128230;</div>
+          <div id="lblLote">Arraste v&#225;rios PDFs aqui ou clique para selecionar</div>
+          <div class="text2" style="font-size:11px;margin-top:4px">Aceita mandados e anexos misturados &#8212; o sistema separa pelo n&#250;mero CNJ</div>
+        </div>
+        <div id="loteFileList" style="margin-top:10px"></div>
+        <button class="btn btn-p" id="btnLoteUpload" style="width:100%;margin-top:14px" disabled>
+          &#128269; Processar PDFs
+        </button>
+        <div id="loteRes" style="margin-top:14px"></div>
+      </div>
+
+      <!-- Coluna 2: Watcher + Print-to-PDF -->
+      <div>
+        <div class="card">
+          <div class="card-title">&#128065; Monitor de Downloads</div>
+          <p class="text2" style="margin-bottom:12px">Liga um monitor na sua pasta <strong>Downloads</strong>. Quando voc&#234; salvar um PDF do PJe (via Ctrl+P), ele &#233; importado automaticamente.</p>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+            <button class="btn btn-p" id="btnWatcherToggle" style="min-width:160px">&#128065; Ligar Monitor</button>
+            <span id="watcherStatus" class="text2" style="font-size:12px">Desligado</span>
+          </div>
+          <div id="watcherLog" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;color:var(--text2);max-height:120px;overflow-y:auto;display:none"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">&#9889; Puxar PDFs Automaticamente</div>
+          <p class="text2" style="margin-bottom:12px">Conecta no Chrome e baixa todos os mandados do PJe de uma vez. <strong>Requer Chrome aberto com debug.</strong></p>
+          <div style="display:flex;gap:8px;margin-bottom:14px">
+            <button class="btn btn-p" id="btnPuxar1G" style="flex:1">&#9889; Puxar Tudo PJe 1G</button>
+            <button class="btn" id="btnPuxar2G" style="flex:1;background:var(--accent2);color:#fff">&#9889; Puxar Tudo PJe 2G</button>
+          </div>
+          <div id="puxarStatus"></div>
+          <div class="text2" style="font-size:11px;line-height:1.7;margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px">
+            <strong>Primeiro uso:</strong><br>
+            1. Execute <code style="background:var(--bg);padding:1px 4px;border-radius:3px">iniciar_chrome_debug.bat</code> (na pasta do projeto)<br>
+            2. Fa&#231;a login no PJe com certificado digital<br>
+            3. Clique no bot&#227;o acima &#8212; o sistema faz tudo sozinho
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">&#128424; Manual: Ctrl+P</div>
+          <div class="text2" style="font-size:11px;line-height:1.7">
+            Alternativa: no PJe, clique &#128424; &#8594; Ctrl+P &#8594; Salvar como PDF &#8594; arraste para Upload ao lado.
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-s btn-sm" id="btnAbrirPje1G">Abrir PJe 1G</button>
+            <button class="btn btn-s btn-sm" id="btnAbrirPje2G">Abrir PJe 2G</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1689,6 +1752,235 @@ function showAlertTexto(msg, type) {
   el.appendChild(d);
   setTimeout(() => clearEl(el), 6000);
 }
+
+// ── Lote PDF ──────────────────────────────────────────────────────────────
+
+(function initLote() {
+  const zone = document.getElementById('zoneLote');
+  const inp = document.getElementById('fileLote');
+  const btn = document.getElementById('btnLoteUpload');
+  let loteFiles = [];
+
+  zone.addEventListener('click', () => inp.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.borderColor = 'var(--accent2)'; });
+  zone.addEventListener('dragleave', () => { zone.style.borderColor = ''; });
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.style.borderColor = '';
+    addFiles(e.dataTransfer.files);
+  });
+  inp.addEventListener('change', () => { addFiles(inp.files); });
+
+  function addFiles(files) {
+    for (const f of files) {
+      if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+        if (!loteFiles.find(x => x.name === f.name && x.size === f.size)) {
+          loteFiles.push(f);
+        }
+      }
+    }
+    renderList();
+  }
+
+  function renderList() {
+    const div = document.getElementById('loteFileList');
+    clearEl(div);
+    btn.disabled = loteFiles.length === 0;
+    document.getElementById('lblLote').textContent =
+      loteFiles.length ? loteFiles.length + ' PDF(s) selecionado(s)' : 'Arraste v\u00e1rios PDFs aqui ou clique para selecionar';
+    if (loteFiles.length) zone.style.borderColor = 'var(--green)';
+
+    loteFiles.forEach((f, i) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:12px;background:var(--bg3);border-radius:6px;margin-bottom:4px';
+      row.innerHTML = '\uD83D\uDCC4 <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+        f.name + '</span><span style="color:var(--text2)">' + (f.size/1024).toFixed(0) + ' KB</span>';
+      const rm = document.createElement('button');
+      rm.textContent = '\u2715'; rm.style.cssText = 'background:none;border:none;color:var(--red);cursor:pointer;font-size:14px';
+      rm.addEventListener('click', () => { loteFiles.splice(i, 1); renderList(); });
+      row.appendChild(rm);
+      div.appendChild(row);
+    });
+  }
+
+  btn.addEventListener('click', async () => {
+    if (!loteFiles.length) return;
+    btn.disabled = true; btn.textContent = '\u23f3 Processando ' + loteFiles.length + ' PDF(s)...';
+    const fd = new FormData();
+    loteFiles.forEach(f => fd.append('arquivos', f));
+    const resDiv = document.getElementById('loteRes');
+    clearEl(resDiv);
+
+    try {
+      const r = await fetch(API + '/processos/upload-lote', {method: 'POST', body: fd});
+      const d = await r.json();
+      if (d.ok) {
+        let html = '<div class="alert a-ok">\u2705 ' + d.processados + ' processo(s) criado(s)';
+        if (d.ignorados) html += ' | ' + d.ignorados + ' arquivo(s) sem n\u00famero CNJ';
+        html += '</div>';
+
+        if (d.resultados && d.resultados.length) {
+          html += '<div style="margin-top:10px">';
+          d.resultados.forEach(r => {
+            const cor = r.ok ? 'var(--green)' : 'var(--red)';
+            const ico = r.ok ? '\u2705' : '\u26a0';
+            html += '<div style="font-size:12px;padding:4px 0;color:' + cor + '">' +
+              ico + ' ' + (r.numero_processo || r.arquivo || '?') +
+              ' \u2014 ' + (r.acao || r.erro || '') +
+              (r.email ? ' \u2014 ' + r.email : '') + '</div>';
+          });
+          html += '</div>';
+        }
+        resDiv.innerHTML = html;
+        loteFiles = [];
+        renderList();
+        loadProcs(); loadStatus();
+      } else {
+        resDiv.innerHTML = '<div class="alert a-err">\u26a0 ' + (d.detail || d.erro || 'Erro') + '</div>';
+      }
+    } catch(e) {
+      resDiv.innerHTML = '<div class="alert a-err">Erro de conex\u00e3o com o servidor.</div>';
+    }
+    btn.disabled = false; btn.textContent = '\uD83D\uDD0D Processar PDFs';
+  });
+})();
+
+// ── Watcher de Downloads ──────────────────────────────────────────────────
+
+(function initWatcher() {
+  let watcherOn = false;
+  let pollTimer = null;
+  const btn = document.getElementById('btnWatcherToggle');
+  const status = document.getElementById('watcherStatus');
+  const log = document.getElementById('watcherLog');
+
+  // Checar estado ao carregar
+  fetch(API + '/watcher/status').then(r=>r.json()).then(d => {
+    if (d.rodando) { watcherOn = true; updateUI(); startPoll(); }
+  }).catch(()=>{});
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    if (!watcherOn) {
+      try {
+        const d = await postJSON(API + '/watcher/iniciar', {});
+        if (d.ok) {
+          watcherOn = true;
+          addLog('\u2705 Monitor ligado! Pasta: ' + (d.pasta || 'Downloads'));
+          startPoll();
+        }
+      } catch(e) { addLog('\u26a0 Erro ao ligar monitor'); }
+    } else {
+      try {
+        await postJSON(API + '/watcher/parar', {});
+        watcherOn = false;
+        stopPoll();
+        addLog('\u26d4 Monitor desligado');
+      } catch(e) {}
+    }
+    updateUI();
+    btn.disabled = false;
+  });
+
+  function updateUI() {
+    if (watcherOn) {
+      btn.textContent = '\u23f9 Desligar Monitor';
+      btn.style.background = 'rgba(239,68,68,.2)';
+      btn.style.color = 'var(--red)';
+      status.innerHTML = '<span class="dot dot-green"></span> Monitorando Downloads...';
+      log.style.display = 'block';
+    } else {
+      btn.textContent = '\uD83D\uDC41 Ligar Monitor';
+      btn.style.background = '';
+      btn.style.color = '';
+      status.textContent = 'Desligado';
+    }
+  }
+
+  function addLog(msg) {
+    log.style.display = 'block';
+    const t = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    log.innerHTML = '<div>' + t + ' \u2014 ' + msg + '</div>' + log.innerHTML;
+  }
+
+  let lastCount = 0;
+  function startPoll() {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+      try {
+        const d = await fetchJSON(API + '/status');
+        const count = d.processos || 0;
+        if (count > lastCount && lastCount > 0) {
+          addLog('\u2705 Novo processo importado! Total: ' + count);
+          loadProcs(); loadStatus();
+        }
+        lastCount = count;
+      } catch(e) {}
+    }, 3000);
+  }
+
+  function stopPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+})();
+
+// ── Puxar PDFs do PJe (automático) ────────────────────────────────────────
+
+document.getElementById('btnPuxar1G').addEventListener('click', () => puxarPje(1));
+document.getElementById('btnPuxar2G').addEventListener('click', () => puxarPje(2));
+
+async function puxarPje(grau) {
+  const btn = document.getElementById('btnPuxar' + grau + 'G');
+  const statusDiv = document.getElementById('puxarStatus');
+  btn.disabled = true;
+  btn.textContent = '\u23f3 Conectando ao Chrome...';
+  statusDiv.innerHTML = '<div class="alert a-info">\u23f3 Conectando ao Chrome e abrindo PJe ' + grau + 'G... Aguarde.</div>';
+
+  try {
+    const r = await fetch(API + '/pje/puxar-tudo', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({grau: grau}),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      let html = '<div class="alert a-ok">\u2705 ' + d.baixados + '/' + d.total + ' mandados baixados!</div>';
+      if (d.resultados && d.resultados.length) {
+        html += '<div style="max-height:300px;overflow-y:auto;margin-top:10px">';
+        d.resultados.forEach(function(r) {
+          const ico = r.ok ? '\u2705' : '\u274c';
+          const cor = r.ok ? 'var(--green)' : 'var(--red)';
+          html += '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">' +
+            ico + ' <span style="font-family:monospace;color:var(--accent2)">' + r.numero_processo + '</span> ' +
+            (r.email ? '<span style="color:var(--green)">' + r.email + '</span> ' : '') +
+            (r.acao ? '<span style="color:var(--text2)">' + r.acao + '</span> ' : '') +
+            (r.erro ? '<span style="color:var(--red);font-size:11px">' + r.erro + '</span>' : '') +
+            '</div>';
+        });
+        html += '</div>';
+      }
+      statusDiv.innerHTML = html;
+      loadProcs(); loadStatus();
+    } else {
+      statusDiv.innerHTML = '<div class="alert a-err">\u26a0 ' + (d.erro || 'Erro desconhecido') + '</div>';
+    }
+  } catch(e) {
+    statusDiv.innerHTML = '<div class="alert a-err">Erro de conex\u00e3o: ' + e.message + '</div>';
+  }
+
+  btn.disabled = false;
+  btn.textContent = '\u26a1 Puxar Tudo PJe ' + grau + 'G';
+}
+
+// ── Botões PJe ────────────────────────────────────────────────────────────
+
+document.getElementById('btnAbrirPje1G').addEventListener('click', () => {
+  window.open('https://pje1g.trf1.jus.br/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam', '_blank');
+});
+document.getElementById('btnAbrirPje2G').addEventListener('click', () => {
+  window.open('https://pje2g.trf1.jus.br/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam', '_blank');
+});
 
 // ── Utils ─────────────────────────────────────────────────────────────────
 async function fetchJSON(url) {

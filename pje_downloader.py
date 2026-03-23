@@ -1,309 +1,258 @@
 """
-pje_downloader.py — Baixa mandados do PJe TRF1 via Playwright.
-Usa o Chrome do usuário (sessão PJe já autenticada com certificado).
-
-Fluxo:
-1. Abre o painel do Oficial de Justiça (1G ou 2G)
-2. Localiza o processo pelo número
-3. Clica no ícone de Imprimir (🖨️) → salva mandado como PDF
-4. Clica em "Gerar PDF" nos Anexos → baixa o anexo
+pje_downloader.py — Baixa mandados do PJe TRF1 via Playwright CDP.
+Conecta ao Chrome do usuário (já autenticado com certificado).
+Usa as abas JÁ ABERTAS do PJe — não cria páginas novas.
 """
 import asyncio
+import base64
 import os
 import re
-import sqlite3
 from pathlib import Path
-from typing import Optional
 
 DOWNLOADS_DIR = Path(__file__).parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
-PJE_URLS = {
-    1: "https://pje1g.trf1.jus.br/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam",
-    2: "https://pje2g.trf1.jus.br/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam",
-}
-
-# Chrome profile do usuário (tem certificado digital e sessão PJe)
-CHROME_PROFILE = os.environ.get(
-    "CHROME_USER_DATA",
-    r"C:\Users\aglan\AppData\Local\Google\Chrome\User Data"
-)
+CDP_URL = "http://127.0.0.1:9222"
 
 
-async def baixar_documentos_pje(
-    processos: list[dict],
-    on_progress=None,
-) -> list[dict]:
+async def puxar_todos_pje(grau: int = 1, on_progress=None) -> dict:
     """
-    Baixa mandados e anexos do PJe para cada processo.
-    processos: lista de dicts com 'id', 'numero_processo', 'grau' (1 ou 2)
-    Retorna lista de resultados com status de cada download.
+    Conecta ao Chrome via CDP.
+    Encontra a aba do PJe já aberta e logada.
+    Lê todos os processos da tabela.
+    Clica no ícone de imprimir de cada → salva como PDF.
     """
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        return [{"numero_processo": p.get("numero_processo", ""), "ok": False,
-                 "erro": "playwright não instalado"} for p in processos]
+    from playwright.async_api import async_playwright
 
     resultados = []
+    pje_host = f"pje{grau}g.trf1.jus.br"
 
     async with async_playwright() as pw:
-        # Conecta ao Chrome que JÁ ESTÁ ABERTO via CDP (Chrome DevTools Protocol)
-        # O Chrome precisa ter sido iniciado com --remote-debugging-port=9222
-        # Caso contrário, abre uma nova instância com o perfil do usuário
-        browser = None
-        context = None
-        page = None
-
-        # Tenta conectar ao Chrome aberto via CDP
         try:
-            browser = await pw.chromium.connect_over_cdp("http://127.0.0.1:9222")
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = await context.new_page()
-            if on_progress:
-                on_progress({"etapa": "conectado", "msg": "Conectado ao Chrome aberto!"})
-        except Exception:
-            # CDP não disponível — abre Chrome com perfil do usuário
-            try:
-                context = await pw.chromium.launch_persistent_context(
-                    user_data_dir=CHROME_PROFILE,
-                    channel="chrome",
-                    headless=False,
-                    accept_downloads=True,
-                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-                )
-                page = context.pages[0] if context.pages else await context.new_page()
-            except Exception as e:
-                try:
-                    browser = await pw.chromium.launch(channel="chrome", headless=False)
-                    context = await browser.new_context(accept_downloads=True)
-                    page = await context.new_page()
-                except Exception as e2:
-                    return [{"numero_processo": p.get("numero_processo", ""),
-                             "ok": False, "erro": f"Feche o Chrome e tente novamente, ou inicie com: chrome --remote-debugging-port=9222"} for p in processos]
+            browser = await pw.chromium.connect_over_cdp(CDP_URL)
+        except Exception as e:
+            return {
+                "ok": False,
+                "erro": f"Chrome não encontrado na porta 9222. Execute iniciar_chrome_debug.bat primeiro. ({e})",
+                "resultados": [],
+            }
 
-        # Agrupar por grau para não ficar alternando
-        por_grau = {}
-        for p in processos:
-            g = p.get("grau", 1)
-            por_grau.setdefault(g, []).append(p)
+        context = browser.contexts[0]
 
-        for grau, procs in por_grau.items():
-            url_painel = PJE_URLS.get(grau, PJE_URLS[1])
+        # Encontrar aba do PJe já aberta
+        pje_page = None
+        for p in context.pages:
+            if pje_host in p.url and "listView" in p.url:
+                pje_page = p
+                break
 
-            if on_progress:
-                on_progress({"etapa": "abrindo_pje", "grau": grau,
-                             "msg": f"Abrindo PJe {grau}º grau..."})
-
-            try:
-                await page.goto(url_painel, wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(3000)
-
-                # Verificar se precisa login
-                if "login" in page.url.lower() or "certificado" in page.url.lower():
-                    if on_progress:
-                        on_progress({"etapa": "aguardando_login",
-                                     "msg": "Faça login no PJe com certificado... aguardando 90s"})
-                    for _ in range(90):
-                        await page.wait_for_timeout(1000)
-                        if "listView" in page.url or "painel" in page.url.lower():
-                            break
-
-            except Exception as e:
-                for p in procs:
-                    resultados.append({"numero_processo": p.get("numero_processo", ""),
-                                       "ok": False, "erro": f"Erro PJe: {e}"})
-                continue
-
-            # Para cada processo neste grau
-            for proc in procs:
-                numero = proc.get("numero_processo", "")
-                proc_id = proc.get("id")
-                resultado = {"numero_processo": numero, "id": proc_id,
-                             "ok": False, "mandado": None, "anexo": None, "erro": None}
-
-                if on_progress:
-                    on_progress({"etapa": "buscando", "numero": numero,
-                                 "msg": f"Buscando {numero}..."})
-
-                try:
-                    mandado, anexo = await _baixar_processo(page, context, numero, grau)
-                    if mandado:
-                        resultado["mandado"] = str(mandado)
-                        resultado["ok"] = True
-                    if anexo:
-                        resultado["anexo"] = str(anexo)
-                        resultado["ok"] = True
-                    if not mandado and not anexo:
-                        resultado["erro"] = "Processo não encontrado no painel"
-                except Exception as e:
-                    resultado["erro"] = str(e)
-
-                resultados.append(resultado)
-                await page.wait_for_timeout(1000)
-
-        await context.close()
-        await browser.close()
-
-    return resultados
-
-
-async def _baixar_processo(page, context, numero_processo: str, grau: int):
-    """
-    No painel do Oficial, localiza o processo e baixa:
-    1. Mandado (botão Imprimir 🖨️ → nova aba → salvar como PDF)
-    2. Anexo (botão "Gerar PDF" na coluna Anexos)
-    """
-    mandado_path = None
-    anexo_path = None
-    num_safe = numero_processo.replace("-", "_").replace(".", "_")
-
-    # Garantir que está no painel
-    url_painel = PJE_URLS.get(grau, PJE_URLS[1])
-    if "listView" not in page.url:
-        await page.goto(url_painel, wait_until="networkidle", timeout=20000)
-        await page.wait_for_timeout(2000)
-
-    # Localizar a linha do processo na tabela
-    # O PJe mostra o número em negrito: "Usucap 1029324-46.2021.4.01.4000 - Intimação"
-    num_curto = numero_processo[:20]  # suficiente para ser único
-
-    # Procurar texto que contém o número do processo
-    try:
-        linha = await page.wait_for_selector(
-            f"tr:has-text('{num_curto}')", timeout=5000
-        )
-    except Exception:
-        # Pode estar em outra página, tentar scroll
-        try:
-            # Tentar buscar pelo campo de pesquisa se existir
-            campos_busca = await page.query_selector_all("input[type='text']")
-            for campo in campos_busca:
-                placeholder = await campo.get_attribute("placeholder") or ""
-                name = await campo.get_attribute("name") or ""
-                if "processo" in placeholder.lower() or "processo" in name.lower():
-                    await campo.fill(numero_processo)
-                    # Clicar botão pesquisar
-                    pesquisar = await page.query_selector("button:has-text('PESQUISAR')")
-                    if pesquisar:
-                        await pesquisar.click()
-                        await page.wait_for_timeout(3000)
+        if not pje_page:
+            # Tentar qualquer aba do PJe
+            for p in context.pages:
+                if pje_host in p.url:
+                    pje_page = p
                     break
 
-            linha = await page.wait_for_selector(
-                f"tr:has-text('{num_curto}')", timeout=5000
-            )
-        except Exception:
-            return None, None
+        if not pje_page:
+            return {
+                "ok": False,
+                "erro": f"Nenhuma aba do PJe {grau}G encontrada. Abra o PJe e faça login primeiro.",
+                "resultados": [],
+            }
 
-    if not linha:
-        return None, None
+        if on_progress:
+            on_progress({"etapa": "conectado", "msg": f"Conectado à aba PJe {grau}G!"})
 
-    # ═══ 1. MANDADO — Botão Imprimir (🖨️) ═══
-    # É o PRIMEIRO ícone/botão na linha (lado esquerdo)
-    # Pelas imagens: ícones são 🖨️ ✏️ 🔗 na primeira célula
-    try:
-        # Seletores para o botão de imprimir (primeiro botão da linha)
-        print_sels = [
-            "input[type='image'][title*='mprimir']",
-            "button[title*='mprimir']",
-            "a[title*='mprimir']",
-            "span[title*='mprimir']",
-            "input[type='image']:first-of-type",
-            "button:first-of-type",
-        ]
-        for sel in print_sels:
-            btn = await linha.query_selector(sel)
-            if btn:
-                # Clicar abre nova aba com o documento HTML
-                try:
-                    async with context.expect_page(timeout=15000) as new_page_info:
-                        await btn.click()
-                    doc_page = await new_page_info.value
-                    await doc_page.wait_for_load_state("networkidle", timeout=20000)
+        # Se não está no painel, navegar
+        if "listView" not in pje_page.url:
+            url_painel = f"https://{pje_host}/pje/Painel/painel_usuario/Paniel_Usuario_Oficial_Justica/listView.seam"
+            await pje_page.goto(url_painel, wait_until="domcontentloaded", timeout=30000)
+            await pje_page.wait_for_timeout(3000)
+
+        # Trazer aba pro foco
+        await pje_page.bring_to_front()
+        await pje_page.wait_for_timeout(2000)
+
+        if on_progress:
+            on_progress({"etapa": "lendo", "msg": "Lendo processos do painel..."})
+
+        # Extrair todos os processos da tabela
+        processos_info = await pje_page.evaluate("""() => {
+            const rows = document.querySelectorAll('tr');
+            const re = /\\d{7}-\\d{2}\\.\\d{4}\\.\\d\\.\\d{2}\\.\\d{4}/;
+            const procs = [];
+            const seen = new Set();
+            rows.forEach((tr) => {
+                const txt = tr.innerText || '';
+                const m = txt.match(re);
+                if (!m || seen.has(m[0])) return;
+                seen.add(m[0]);
+
+                // Destinatário
+                let dest = '';
+                const dm = txt.match(/Destinat[aá]rio\\(?s?\\)?\\s*(.+?)(?=\\s{2,}|Rua |Endere|CEP|Expedi|$)/i);
+                if (dm) dest = dm[1].trim();
+
+                // Endereço (coluna com Rua/CEP)
+                let end = '';
+                const cells = tr.querySelectorAll('td');
+                for (let i = 0; i < cells.length; i++) {
+                    const ct = cells[i].innerText;
+                    if (ct.match(/Rua |Av |CEP|\\d{5}-\\d{3}/i)) {
+                        end = ct.trim();
+                        break;
+                    }
+                }
+
+                procs.push({
+                    numero: m[0],
+                    destinatario: dest.substring(0, 150),
+                    endereco: end.substring(0, 300),
+                });
+            });
+            return procs;
+        }""")
+
+        total = len(processos_info)
+        if on_progress:
+            on_progress({"etapa": "encontrados", "msg": f"{total} processos encontrados"})
+
+        if total == 0:
+            return {"ok": True, "total": 0, "baixados": 0,
+                    "erro": "Nenhum processo encontrado no painel", "resultados": []}
+
+        # Para cada processo, clicar no botão de imprimir
+        for i, proc in enumerate(processos_info):
+            numero = proc["numero"]
+            num_safe = numero.replace("-", "_").replace(".", "_")
+
+            if on_progress:
+                on_progress({"etapa": "baixando",
+                             "msg": f"[{i+1}/{total}] {numero}"})
+
+            resultado = {
+                "numero_processo": numero,
+                "destinatario": proc.get("destinatario", ""),
+                "endereco": proc.get("endereco", ""),
+                "ok": False, "mandado": None, "erro": None,
+            }
+
+            try:
+                # Contar páginas antes do clique
+                pages_before = len(context.pages)
+
+                # Clicar no primeiro ícone da linha do processo (imprimir)
+                clicked = await pje_page.evaluate("""(num) => {
+                    const rows = document.querySelectorAll('tr');
+                    for (const tr of rows) {
+                        if (!(tr.innerText || '').includes(num)) continue;
+                        // Primeiro: input[type=image] (ícones do PJe são inputs de imagem)
+                        const imgs = tr.querySelectorAll('input[type="image"]');
+                        if (imgs.length > 0) { imgs[0].click(); return 'input_image'; }
+                        // Segundo: qualquer link/botão
+                        const links = tr.querySelectorAll('a, button');
+                        if (links.length > 0) { links[0].click(); return 'link'; }
+                        return 'no_button';
+                    }
+                    return 'not_found';
+                }""", numero)
+
+                if clicked in ("not_found", "no_button"):
+                    resultado["erro"] = f"Botão não encontrado ({clicked})"
+                    resultados.append(resultado)
+                    continue
+
+                # Esperar nova aba abrir
+                await pje_page.wait_for_timeout(3000)
+
+                # Verificar se abriu nova aba
+                doc_page = None
+                if len(context.pages) > pages_before:
+                    # Pegar a última página aberta
+                    doc_page = context.pages[-1]
+                    await doc_page.wait_for_load_state("domcontentloaded", timeout=15000)
                     await doc_page.wait_for_timeout(2000)
 
-                    # Salvar como PDF
+                if doc_page and doc_page != pje_page:
                     mandado_file = DOWNLOADS_DIR / f"mandado_{num_safe}.pdf"
-                    await doc_page.pdf(
-                        path=str(mandado_file),
-                        format="A4",
-                        print_background=True,
-                        margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"},
-                    )
-                    await doc_page.close()
 
-                    if mandado_file.exists() and mandado_file.stat().st_size > 1024:
-                        mandado_path = mandado_file
-                        break
-                except Exception as e:
-                    print(f"[pje] Erro imprimir {numero_processo}: {e}")
-                    continue
-    except Exception as e:
-        print(f"[pje] Erro buscando botão imprimir: {e}")
-
-    # ═══ 2. ANEXO — Botão "Gerar PDF" (coluna Anexos, lado direito) ═══
-    try:
-        anexo_sels = [
-            "input[type='image'][title*='erar PDF']",
-            "button[title*='erar PDF']",
-            "a[title*='erar PDF']",
-            "td:last-child input[type='image']",
-            "td:last-child button",
-            "td:last-child a[href*='documento']",
-        ]
-        for sel in anexo_sels:
-            btn = await linha.query_selector(sel)
-            if btn:
-                try:
-                    # Pode ser download direto ou nova aba
+                    # Tentar salvar como PDF via CDP
                     try:
-                        async with page.expect_download(timeout=15000) as dl_info:
-                            await btn.click()
-                        download = await dl_info.value
-                        anexo_file = DOWNLOADS_DIR / f"anexo_{num_safe}.pdf"
-                        await download.save_as(str(anexo_file))
-                        if anexo_file.exists() and anexo_file.stat().st_size > 512:
-                            anexo_path = anexo_file
-                            break
-                    except Exception:
-                        # Pode abrir nova aba
+                        cdp = await doc_page.context.new_cdp_session(doc_page)
+                        pdf_data = await cdp.send("Page.printToPDF", {
+                            "printBackground": True,
+                            "marginTop": 0.4,
+                            "marginBottom": 0.4,
+                            "marginLeft": 0.4,
+                            "marginRight": 0.4,
+                        })
+                        await cdp.detach()
+
+                        pdf_bytes = base64.b64decode(pdf_data["data"])
+                        with open(mandado_file, "wb") as f:
+                            f.write(pdf_bytes)
+
+                        if mandado_file.exists() and mandado_file.stat().st_size > 500:
+                            resultado["mandado"] = str(mandado_file)
+                            resultado["ok"] = True
+
+                    except Exception as pdf_err:
+                        # Fallback: salvar HTML
+                        html_file = DOWNLOADS_DIR / f"mandado_{num_safe}.html"
                         try:
-                            async with context.expect_page(timeout=10000) as new_page_info:
-                                await btn.click()
-                            doc_page = await new_page_info.value
-                            await doc_page.wait_for_load_state("networkidle", timeout=15000)
-                            await doc_page.wait_for_timeout(1500)
-                            anexo_file = DOWNLOADS_DIR / f"anexo_{num_safe}.pdf"
-                            await doc_page.pdf(path=str(anexo_file), format="A4", print_background=True)
-                            await doc_page.close()
-                            if anexo_file.exists() and anexo_file.stat().st_size > 512:
-                                anexo_path = anexo_file
-                                break
-                        except Exception:
-                            pass
-                except Exception:
-                    continue
-    except Exception as e:
-        print(f"[pje] Erro buscando anexo: {e}")
+                            html_content = await doc_page.content()
+                            with open(html_file, "w", encoding="utf-8") as f:
+                                f.write(html_content)
+                            resultado["mandado"] = str(html_file)
+                            resultado["ok"] = True
+                            resultado["erro"] = f"Salvo como HTML ({pdf_err})"
+                        except Exception as html_err:
+                            resultado["erro"] = f"PDF: {pdf_err} | HTML: {html_err}"
 
-    return mandado_path, anexo_path
+                    # Fechar a aba do documento
+                    try:
+                        await doc_page.close()
+                    except Exception:
+                        pass
+
+                    # Voltar foco pro painel
+                    await pje_page.bring_to_front()
+                    await pje_page.wait_for_timeout(1000)
+
+                else:
+                    resultado["erro"] = "Nova aba não abriu após clique"
+
+            except Exception as e:
+                resultado["erro"] = str(e)
+
+            resultados.append(resultado)
+
+        # NÃO fechar o browser - é o Chrome do usuário!
+
+    return {
+        "ok": True,
+        "total": total,
+        "baixados": sum(1 for r in resultados if r["ok"]),
+        "resultados": resultados,
+    }
 
 
-# ── Versão síncrona para FastAPI ──────────────────────────────────────────────
-
-def baixar_documentos_pje_sync(
-    processos: list[dict],
-    on_progress=None,
-) -> list[dict]:
+def puxar_todos_pje_sync(grau: int = 1, on_progress=None) -> dict:
     """Wrapper síncrono."""
+    loop = asyncio.new_event_loop()
     try:
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(
-            baixar_documentos_pje(processos, on_progress)
-        )
+        return loop.run_until_complete(puxar_todos_pje(grau, on_progress))
     except Exception as e:
-        return [{"numero_processo": p.get("numero_processo", ""),
-                 "ok": False, "erro": str(e)} for p in processos]
+        return {"ok": False, "erro": str(e), "resultados": []}
     finally:
         loop.close()
+
+
+# Compatibilidade
+def baixar_documentos_pje_sync(processos, on_progress=None):
+    graus = set(p.get("grau", 1) for p in processos)
+    all_results = []
+    for g in graus:
+        result = puxar_todos_pje_sync(g, on_progress)
+        all_results.extend(result.get("resultados", []))
+    return all_results
